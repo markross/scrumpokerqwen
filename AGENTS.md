@@ -35,11 +35,12 @@ Phase 3 features are NOT agreed — confirm with the user before building them. 
 
 - `server/rooms.ts` is a pure state machine over a `Store` (Map). No socket.io in it — server wiring stays in `server/index.ts`.
 - Vote secrecy: the server only ever broadcasts per-player sanitized views via `getView`; peers must not receive others' `vote` values before reveal (they see `hasVoted` only). Check this in devtools when touching any broadcast path.
-- Player identity: `playerId` lives in client `sessionStorage`; the server keeps seat + vote across refreshes, explicit Leave removes. Rooms are in-memory with a 24 h stale-room sweep.
+- Player identity: `playerId` lives in client `sessionStorage`; the server keeps seat + vote across refreshes, explicit Leave removes. Rooms are in-memory; the sweep deletes **unnamed** stale rooms after 24 h — **named rooms are exempt and live forever** (agreed 2026-10-19).
+- Persistence: `server/persistence.ts` defines `RoomRepository` (memory default | Upstash Redis REST when `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` are set). `index.ts` hydrates the store before listening and queues coalesced snapshots after meaningful mutations; `rooms.ts` stays pure — serialize/hydrate helpers live there, repository wiring stays in `index.ts`. Never let a persistence error take down the server.
 - Product spec: anyone can Reveal/Reset, Reveal works with zero votes, deck is `0 1 2 3 5 8 13 21 ? ∞`, late join anytime.
 
 ## Misc
 
-- Env: `PORT` (default 3001), `CORS_ORIGIN` (comma-separated allowlist; leave unset for dev and the single-service production deploy).
-- Deploy: `render.yaml` Blueprint + multi-stage `Dockerfile` (runs `npm start` as non-root). In-memory state: restarts wipe rooms — documented and accepted for v0.1.
+- Env: `PORT` (default 3001), `CORS_ORIGIN` (comma-separated allowlist; leave unset for dev and the single-service production deploy), `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` (both set = durable rooms; unset = memory-only, e.g. dev/tests).
+- Deploy: `render.yaml` Blueprint + multi-stage `Dockerfile` (runs `npm start` as non-root). Rooms are memory-only unless `UPSTASH_REDIS_REST_URL`/`_TOKEN` are set in the dashboard (`sync:false` in render.yaml) — with them, state survives restarts (see README "Environment").
 - `server/index.ts` exports `httpServer`/`io` and only auto-listens when `process.env.VITEST` is unset — `server/realtime.test.ts` boots it on port 0. Don't remove the guard or the exports.

@@ -9,3 +9,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Optional: set both in the Render dashboard (free Upstash Redis database)
+      # to persist rooms across restarts/redeploys. sync:false keeps Blueprint
+      # from overwriting the dashboard-set secrets.
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false

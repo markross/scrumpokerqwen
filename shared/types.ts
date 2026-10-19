@@ -16,6 +16,7 @@ export interface PlayerView {
 
 export interface RoomState {
   code: string
+  name: string | null
   phase: Phase
   players: PlayerView[]
   votedCount: number
@@ -26,6 +27,7 @@ export interface JoinPayload {
   name: string
   playerId: string
   code?: string
+  roomName?: string
 }
 
 export type JoinResult = { ok: true; code: string } | { ok: false; error: string }

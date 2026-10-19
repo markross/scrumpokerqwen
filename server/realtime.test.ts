@@ -180,3 +180,56 @@ describe('realtime flow (two socket.io clients)', () => {
     expect(code2).not.toBe(code1)
   })
 })
+
+describe('named rooms (two socket.io clients)', () => {
+  it('creates a named room and joins the same room by name', async () => {
+    const alice = await connect()
+    const aliceRec = record(alice)
+    const created = await alice.emitWithAck('room:create', {
+      name: 'Alice',
+      playerId: 'nA',
+      roomName: '  Team   Retro  '
+    })
+    const code = unwrap(created)
+    const firstState = await aliceRec.until((s) => s.name === 'Team Retro')
+    expect(firstState.code).toBe(code)
+
+    const bob = await connect()
+    const bobRec = record(bob)
+    const joined = await bob.emitWithAck('room:join', {
+      name: 'Bob',
+      playerId: 'nB',
+      roomName: 'team retro'
+    })
+    expect(unwrap(joined)).toBe(code)
+    await Promise.all([aliceRec.until(twoPlayers), bobRec.until(twoPlayers)])
+
+    // Secrecy still holds in a named room.
+    bob.emit('vote:place', { value: '8' })
+    const sawVote = await aliceRec.until((s) => byId(s, 'nB')?.hasVoted === true)
+    expect(byId(sawVote, 'nB')?.vote).toBeNull()
+  })
+
+  it('rejects a duplicate room name and unknown joins via ack errors', async () => {
+    const host = await connect()
+    unwrap(await host.emitWithAck('room:create', { name: 'Host', playerId: 'nH', roomName: 'Sprint 42' }))
+
+    const copycat = await connect()
+    const dup = await copycat.emitWithAck('room:create', {
+      name: 'Copycat',
+      playerId: 'nC',
+      roomName: 'sprint  42'
+    })
+    expect(dup.ok).toBe(false)
+    if (!dup.ok) expect(dup.error).toMatch(/already exists/i)
+
+    const stranger = await connect()
+    const unknown = await stranger.emitWithAck('room:join', {
+      name: 'Stranger',
+      playerId: 'nS',
+      roomName: 'No Such Room'
+    })
+    expect(unknown.ok).toBe(false)
+    if (!unknown.ok) expect(unknown.error).toMatch(/not found/i)
+  })
+})

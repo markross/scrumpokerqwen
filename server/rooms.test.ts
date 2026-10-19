@@ -2,15 +2,20 @@ import { describe, expect, it } from 'vitest'
 import {
   attachSocket,
   createRoom,
+  deserializeRoom,
   detachSocket,
   generateCode,
   getView,
+  hydrateStore,
   joinRoom,
+  joinRoomByName,
   placeVote,
   removePlayer,
   resetRoom,
   revealRoom,
+  serializeRoom,
   sweepStaleRooms,
+  type RoomSnapshot,
   type Store
 } from './rooms.js'
 
@@ -233,5 +238,120 @@ describe('sweepStaleRooms', () => {
     room.updatedAt = Date.now() - 25 * 60 * 60 * 1000
     sweepStaleRooms(store)
     expect(store.has(code)).toBe(false)
+  })
+
+  it('keeps named rooms regardless of age', () => {
+    const store: Store = new Map()
+    const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    room.updatedAt = Date.now() - 30 * 24 * 60 * 60 * 1000
+    sweepStaleRooms(store)
+    expect(store.has(room.code)).toBe(true)
+  })
+
+  it('returns the codes it deleted (for durable cleanup)', () => {
+    const store: Store = new Map()
+    const named = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    const stale = ok(createRoom(store, 'Bob', 'p2'))
+    stale.updatedAt = Date.now() - 25 * 60 * 60 * 1000
+    const deleted = sweepStaleRooms(store)
+    expect(deleted).toEqual([stale.code])
+    expect(store.has(named.code)).toBe(true)
+  })
+})
+
+describe('room names', () => {
+  it('stores a normalized name, and null when omitted or blank', () => {
+    const store: Store = new Map()
+    const named = ok(createRoom(store, 'Alice', 'p1', '  Team   Alpha  '))
+    expect(named.name).toBe('Team Alpha')
+    const blank = ok(createRoom(store, 'Bob', 'p2', '   '))
+    expect(blank.name).toBeNull()
+    const plain = ok(createRoom(store, 'Carol', 'p3'))
+    expect(plain.name).toBeNull()
+  })
+
+  it('accepts names up to 40 characters and rejects longer ones', () => {
+    const store: Store = new Map()
+    expect(createRoom(store, 'Alice', 'p1', 'x'.repeat(40)).ok).toBe(true)
+    expect(createRoom(store, 'Alice', 'p2', 'x'.repeat(41)).ok).toBe(false)
+  })
+
+  it('rejects a duplicate name case- and whitespace-insensitively', () => {
+    const store: Store = new Map()
+    ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    expect(createRoom(store, 'Bob', 'p2', '  team   ALPHA ').ok).toBe(false)
+  })
+
+  it('allows the same name again after the room is gone', () => {
+    const store: Store = new Map()
+    const first = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    store.delete(first.code)
+    expect(createRoom(store, 'Bob', 'p2', 'Team Alpha').ok).toBe(true)
+  })
+
+  it('exposes the name in the player view', () => {
+    const store: Store = new Map()
+    const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    expect(getView(room, 'p1').name).toBe('Team Alpha')
+  })
+})
+
+describe('joinRoomByName', () => {
+  it('joins the named room, case- and whitespace-insensitively', () => {
+    const store: Store = new Map()
+    const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    const joined = ok(joinRoomByName(store, '  team   alpha ', 'Bob', 'p2'))
+    expect(joined.code).toBe(room.code)
+    expect(joined.players.size).toBe(2)
+  })
+
+  it('keeps seat and vote when the same playerId rejoins by name', () => {
+    const store: Store = new Map()
+    const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    ok(placeVote(store, room.code, 'p1', '8'))
+    const joined = ok(joinRoomByName(store, 'Team Alpha', 'Someone Else', 'p1'))
+    expect(joined.players.size).toBe(1)
+    expect(joined.players.get('p1')!.name).toBe('Alice')
+    expect(joined.players.get('p1')!.vote).toBe('8')
+  })
+
+  it('errors on unknown or blank names and on a full room', () => {
+    const store: Store = new Map()
+    expect(joinRoomByName(store, 'Nope', 'Bob', 'p2').ok).toBe(false)
+    expect(joinRoomByName(store, '   ', 'Bob', 'p2').ok).toBe(false)
+    const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    for (let i = 0; i < 29; i++) room.players.set(`x${i}`, { id: `x${i}`, name: 'X', vote: null, socketId: null })
+    expect(joinRoomByName(store, 'Team Alpha', 'Bob', 'p99').ok).toBe(false)
+  })
+})
+
+describe('snapshots', () => {
+  it('round-trips a room through serialize/deserialize with socketIds dropped', () => {
+    const store: Store = new Map()
+    const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    ok(attachSocket(store, room.code, 'p1', 's1'))
+    ok(placeVote(store, room.code, 'p1', '13'))
+    ok(revealRoom(store, room.code))
+
+    const snapshot = serializeRoom(store.get(room.code)!)
+    const revived = deserializeRoom(JSON.parse(JSON.stringify(snapshot)) as RoomSnapshot)
+    expect(revived.code).toBe(room.code)
+    expect(revived.name).toBe('Team Alpha')
+    expect(revived.phase).toBe('revealed')
+    expect(revived.players.get('p1')!.vote).toBe('13')
+    expect(revived.players.get('p1')!.socketId).toBeNull()
+  })
+
+  it('hydrateStore restores rooms but never clobbers live ones', () => {
+    const store: Store = new Map()
+    const live = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    const snapshot = serializeRoom(live)
+    const other = ok(createRoom(store, 'Bob', 'p2'))
+    const ghost = serializeRoom({ ...other, name: 'Ghost', phase: 'revealed' })
+
+    hydrateStore(store, [ghost, serializeRoom({ ...snapshot, name: 'Changed' })])
+    expect(store.get(other.code)!.name).toBeNull()
+    expect(store.get(live.code)!.name).toBe('Team Alpha')
+    expect(store.size).toBe(2)
   })
 })

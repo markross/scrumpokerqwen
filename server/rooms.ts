@@ -6,6 +6,7 @@ import {
   type PlayerView,
   type RoomState
 } from '../shared/types.js'
+import { normalizeRoomName, roomNameKey, validRoomName } from '../shared/naming.js'
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const CODE_LENGTH = 5
@@ -22,9 +23,25 @@ export interface Player {
 
 export interface Room {
   code: string
+  name: string | null
   phase: Phase
   players: Map<string, Player>
   updatedAt: number
+}
+
+/** JSON-safe form of a Room used for durable snapshots (socketIds are per-process, dropped). */
+export interface PlayerSnapshot {
+  id: string
+  name: string
+  vote: DeckValue | null
+}
+
+export interface RoomSnapshot {
+  code: string
+  name: string | null
+  phase: Phase
+  updatedAt: number
+  players: PlayerSnapshot[]
 }
 
 export type Store = Map<string, Room>
@@ -59,17 +76,43 @@ export function generateCode(store: Store): string {
   throw new Error('Room code space exhausted')
 }
 
-export function createRoom(store: Store, name: string, playerId: string): Result<Room> {
+export function createRoom(
+  store: Store,
+  name: string,
+  playerId: string,
+  roomName?: string
+): Result<Room> {
   if (!validName(name)) return fail('Please enter a name (1–24 characters).')
+  let room: string | null = null
+  if (roomName !== undefined && normalizeRoomName(roomName).length > 0) {
+    if (!validRoomName(roomName)) return fail('Please enter a room name (1–40 characters).')
+    room = normalizeRoomName(roomName)
+    const taken = [...store.values()].some((other) => other.name !== null && roomNameKey(other.name) === roomNameKey(room!))
+    if (taken) return fail(`A room named "${room}" already exists. Pick a different name.`)
+  }
   const code = generateCode(store)
-  const room: Room = {
+  const created: Room = {
     code,
+    name: room,
     phase: 'voting',
     players: new Map(),
     updatedAt: Date.now()
   }
+  created.players.set(playerId, { id: playerId, name: name.trim(), vote: null, socketId: null })
+  store.set(code, created)
+  return { ok: true, value: created }
+}
+
+function joinExisting(room: Room, name: string, playerId: string): Result<Room> {
+  const existing = room.players.get(playerId)
+  if (existing) {
+    touch(room)
+    return { ok: true, value: room }
+  }
+  if (!validName(name)) return fail('Please enter a name (1–24 characters).')
+  if (room.players.size >= MAX_PLAYERS) return fail('This room is full.')
   room.players.set(playerId, { id: playerId, name: name.trim(), vote: null, socketId: null })
-  store.set(code, room)
+  touch(room)
   return { ok: true, value: room }
 }
 
@@ -82,18 +125,21 @@ export function joinRoom(
   const code = normalizeCode(rawCode)
   const room = store.get(code)
   if (!room) return fail(`Room "${code}" was not found. Check the code or create a new room.`)
+  return joinExisting(room, name, playerId)
+}
 
-  const existing = room.players.get(playerId)
-  if (existing) {
-    touch(room)
-    return { ok: true, value: room }
-  }
-
-  if (!validName(name)) return fail('Please enter a name (1–24 characters).')
-  if (room.players.size >= MAX_PLAYERS) return fail('This room is full.')
-  room.players.set(playerId, { id: playerId, name: name.trim(), vote: null, socketId: null })
-  touch(room)
-  return { ok: true, value: room }
+export function joinRoomByName(
+  store: Store,
+  rawRoomName: string,
+  name: string,
+  playerId: string
+): Result<Room> {
+  const wanted = normalizeRoomName(rawRoomName)
+  if (wanted.length === 0) return fail('Enter a room name to join.')
+  const key = roomNameKey(wanted)
+  const room = [...store.values()].find((other) => other.name !== null && roomNameKey(other.name) === key)
+  if (!room) return fail(`A room named "${wanted}" was not found. Check the name or create a new room.`)
+  return joinExisting(room, name, playerId)
 }
 
 function requireRoom(store: Store, rawCode: string): Room | { ok: false; error: string } {
@@ -183,6 +229,7 @@ export function getView(room: Room, forPlayerId: string): RoomState {
   }))
   return {
     code: room.code,
+    name: room.name,
     phase: room.phase,
     players,
     votedCount: players.filter((player) => player.hasVoted).length,
@@ -190,8 +237,51 @@ export function getView(room: Room, forPlayerId: string): RoomState {
   }
 }
 
-export function sweepStaleRooms(store: Store, now: number = Date.now()): void {
+/** Drops stale unnamed rooms; named rooms persist forever. Returns deleted codes. */
+export function sweepStaleRooms(store: Store, now: number = Date.now()): string[] {
+  const deleted: string[] = []
   for (const [code, room] of store) {
-    if (now - room.updatedAt > ROOM_TTL_MS) store.delete(code)
+    if (room.name !== null) continue
+    if (now - room.updatedAt > ROOM_TTL_MS) {
+      store.delete(code)
+      deleted.push(code)
+    }
+  }
+  return deleted
+}
+
+export function serializeRoom(room: Room): RoomSnapshot {
+  return {
+    code: room.code,
+    name: room.name,
+    phase: room.phase,
+    updatedAt: room.updatedAt,
+    players: [...room.players.values()].map((player) => ({
+      id: player.id,
+      name: player.name,
+      vote: player.vote
+    }))
+  }
+}
+
+export function deserializeRoom(snapshot: RoomSnapshot): Room {
+  const players = new Map<string, Player>()
+  for (const p of snapshot.players) {
+    players.set(p.id, { id: p.id, name: p.name, vote: p.vote, socketId: null })
+  }
+  return {
+    code: snapshot.code,
+    name: snapshot.name,
+    phase: snapshot.phase,
+    players,
+    updatedAt: snapshot.updatedAt
+  }
+}
+
+/** Restores persisted snapshots into the live store; never clobbers a live room. */
+export function hydrateStore(store: Store, snapshots: RoomSnapshot[]): void {
+  for (const snapshot of snapshots) {
+    if (store.has(snapshot.code)) continue
+    store.set(snapshot.code, deserializeRoom(snapshot))
   }
 }
