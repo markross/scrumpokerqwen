@@ -1,0 +1,19 @@
+{
+  "name": "@scrumpoker/server",
+  "private": true,
+  "type": "module",
+  "main": "dist/server/index.js",
+  "scripts": {
+    "dev": "tsx watch index.ts",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "socket.io": "^4.8.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.7.0",
+    "tsx": "^4.20.0"
+  }
+}
