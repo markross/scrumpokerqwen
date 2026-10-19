@@ -69,10 +69,15 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 | `9cee10c` | ci: bump checkout/setup-node actions; docs: record GitHub push + CI green |
 | `673c7c0` | chore: PR-review workflow (branch protection via API, PR template, docs) — PR #1 |
 | `02c414d` | docs: record Render deploy live + production socket smoke — PR #2 |
+| `2d6b1a8` | docs: close out resolved open questions — PR #3 |
+| `0c9f9f9` | docs: mark Phase 1 complete (live two-device QA); rate-limit deferred — PR #4 |
+| `84b553e` | docs: record Phase 3 agreement (share links + theme toggle) and scale answer — PR #5 |
+| `7d1fa41` | feat(client): share links via `?join=CODE` prefill + copy invite link — PR #6 |
+| `7ff0140` | feat(client): light/dark theme toggle — PR #7 |
 
 ## Next steps
 
-Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user decision — see below). **Phase 3 partially agreed 2026-10-19**: user approved **share links (`?join=CODE`)** and **light/dark theme toggle** — shipping as `feat/share-links` + `feat/theme-toggle` PRs. Scale answered (open question 3): **a handful of small rooms** → in-memory single instance confirmed sufficient; persistence/Redis and rate-limiting stay deferred. Remaining backlog items below are still NOT agreed — confirm before building.
+Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user decision — see below). **Phase 3 (agreed slice) SHIPPED ✅ 2026-10-19**: share links (PR #6) + light/dark theme toggle (PR #7) merged to `main`, CI green, and **live-verified on Render** (no-FOUC theme script + `"join"`/`Copy invite link` strings present in the served bundle). Scale answered (open question 3): **a handful of small rooms** → in-memory single instance confirmed sufficient; persistence/Redis and rate-limiting stay deferred. **Next actionable work: confirm with the user** whether to pick another backlog item (story text ruled out; remaining unagreed options: spectator/facilitator roles, sound on reveal, CSV export, Playwright UI tests) — do not build unagreed features.
 
 ### Phase 1 — Ship it ✅ COMPLETE
 
@@ -93,9 +98,9 @@ Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user 
 
 - **Story text per round**: a "current story" field (someone types the story being estimated; shown above the grid) and a lightweight backlog/next-story flow — the natural evolution of "Reset = new round".
 - **Persistence / multi-instance**: move room store behind an interface (in-memory → Redis) if they ever need restart survival or >1 server instance. **Deferred 2026-10-19**: scale = a handful of small rooms; in-memory stays.
-- ✅ **Share links** (`?join=CODE` prefill so the creator can send one clickable link) — **agreed 2026-10-19**, PR `feat/share-links` (client-only: `client/src/lib/share.ts`, JoinScreen prefill, Room "Copy invite link").
+- ✅ **Share links** (`?join=CODE` prefill so the creator can send one clickable link) — **agreed + shipped 2026-10-19**, merged PR #6 (client-only: `client/src/lib/share.ts`, JoinScreen prefill, Room "Copy invite link"; live-verified on Render).
 - **Spectator/facilitator roles**: only agreed "anyone can control" for now; if a facilitator model is ever wanted, gate reveal/reset server-side.
-- ✅ **Light/dark theme toggle** — **agreed 2026-10-19**, PR `feat/theme-toggle` (client-only: `ThemeToggle` + `lib/theme.ts`; localStorage `scrumpoker.theme`, system default, no-FOUC script in `index.html`).
+- ✅ **Light/dark theme toggle** — **agreed + shipped 2026-10-19**, merged PR #7 (client-only: `ThemeToggle` + `lib/theme.ts`; localStorage `scrumpoker.theme`, system default, no-FOUC script in `index.html`; live-verified on Render).
 - Sound on reveal; export results CSV. (not agreed)
 
 ### Open questions for the user
