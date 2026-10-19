@@ -34,13 +34,13 @@ Node 24 LTS · Express 5 · socket.io 4 · TypeScript 5 strict (shared event con
 
 ### Verified (all green at last run)
 
-- `npm test` — 49/49 Vitest tests (`server/rooms.test.ts` 36 unit: secrecy, reveal, reset, late join, reconnect, validation, TTL sweep + room-name rules, join-by-name, named-sweep exemption, snapshot round-trip/hydration; `server/persistence.test.ts` 8: memory round-trip, repository coalescing, deletes win, close-flush, error-swallowing, loadAll parsing/failure, env factory; `server/realtime.test.ts` 5 two-client socket.io e2e: wire-level secrecy, reveal/reset, disconnect/reconnect, leave, bad joins + named-room create/join-by-name/secrecy and duplicate-name ack errors)
+- `npm test` — 51/51 Vitest tests (`server/rooms.test.ts` 36 unit: secrecy, reveal, reset, late join, reconnect, validation, TTL sweep + room-name rules, join-by-name, named-sweep exemption, snapshot round-trip/hydration; `server/persistence.test.ts` 10: memory round-trip, repository coalescing, deletes win, close-flush, error-swallowing, loadAll parsing incl. real-client pre-parsed values + empty-hash/null + failure, env factory; `server/realtime.test.ts` 5 two-client socket.io e2e: wire-level secrecy, reveal/reset, disconnect/reconnect, leave, bad joins + named-room create/join-by-name/secrecy and duplicate-name ack errors)
 - `npm run lint` — clean; `npm run build` — clean
 - The throwaway two-client realtime script is now permanent: `server/realtime.test.ts` (runs in `npm test`)
 - Prod server serves built client + SPA routes + healthz
 - `docker build` succeeds; container smoke-tested on port 3006 (healthz + index)
 - `npm run dev` boots both processes, proxy works
-- Room-names run (2026-10-19): `npm start` smoke — `/healthz` reports `{"ok":true,"rooms":0,"persistence":"memory"}`, hydration-before-listen boot path OK; Redis path covered via injected fake client (no live Redis in CI by design)
+- Room-names run (2026-10-19): `npm start` smoke — `/healthz` reports `{"ok":true,"rooms":0,"persistence":"memory"}`, hydration-before-listen boot path OK. **Redis path cross-process smoke PASSED** (throwaway `smoke-upstash.mjs`, not committed): compiled server booted twice against a protocol-faithful Upstash REST fake (auto-pipelined writes + base64 wire form) — named room created → vote coalesced to Redis → clean SIGTERM → restart → hydration restored the room; same-playerId rejoin **by name** recovered seat + display name + vote; late join + post-restart name-uniqueness + bearer-auth verified. Caught a real bug: the live `@upstash/redis` `hgetall` pre-parses hash values, so `loadAll` was fixed to accept objects (fixed in `b6cabfc` with 2 regression tests). No live Redis in CI by design.
 
 - Human browser walkthrough (two tabs, dev = :5173): name entry → create/join → vote secrecy verified in devtools WS frames (peer `vote:null`, `hasVoted` visible) → reveal flip → summary → reset → mid-round refresh keeps seat+vote → late join → leave/confirm — **passed 2026-10-19**
 
