@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { clearJoinParam, joinCodeFromUrl } from '@/lib/share'
 import { readStoredName } from '@/useRoom'
 
 interface JoinScreenProps {
@@ -18,7 +19,7 @@ interface JoinScreenProps {
 
 export function JoinScreen({ onCreate, onJoin, error, busy }: JoinScreenProps): ReactElement {
   const [name, setName] = useState(readStoredName)
-  const [code, setCode] = useState('')
+  const [code, setCode] = useState(joinCodeFromUrl)
 
   const trimmed = name.trim()
   const canSubmit = trimmed.length > 0 && !busy
@@ -30,7 +31,10 @@ export function JoinScreen({ onCreate, onJoin, error, busy }: JoinScreenProps): 
 
   function handleJoin(e: FormEvent): void {
     e.preventDefault()
-    if (canSubmit && code.trim().length >= 3) onJoin(code.trim().toUpperCase(), trimmed)
+    if (canSubmit && code.trim().length >= 3) {
+      clearJoinParam()
+      onJoin(code.trim().toUpperCase(), trimmed)
+    }
   }
 
   return (

@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import { Check, Copy, Eye, LogOut, RotateCcw, Spade, WifiOff } from 'lucide-react'
+import { Check, Copy, Eye, Link2, LogOut, RotateCcw, Spade, WifiOff } from 'lucide-react'
 import type { DeckValue, RoomState } from '@shared/types'
 
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +14,7 @@ import {
   DialogTitle,
   DialogTrigger
 } from '@/components/ui/dialog'
+import { shareLinkForCode } from '@/lib/share'
 import { PlayerCard } from '@/components/PlayerCard'
 import { SummaryBar } from '@/components/SummaryBar'
 import { ThemeToggle } from '@/components/ThemeToggle'
@@ -31,6 +32,7 @@ interface RoomProps {
 
 export function Room({ state, meId, connected, onVote, onReveal, onReset, onLeave }: RoomProps): ReactElement {
   const [copied, setCopied] = useState(false)
+  const [copiedLink, setCopiedLink] = useState(false)
   const revealed = state.phase === 'revealed'
   const me = state.players.find((p) => p.id === meId)
   const allVoted = state.total > 0 && state.votedCount === state.total
@@ -39,6 +41,13 @@ export function Room({ state, meId, connected, onVote, onReveal, onReset, onLeav
     void navigator.clipboard.writeText(state.code).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  function copyLink(): void {
+    void navigator.clipboard.writeText(shareLinkForCode(state.code)).then(() => {
+      setCopiedLink(true)
+      setTimeout(() => setCopiedLink(false), 1500)
     })
   }
 
@@ -55,6 +64,9 @@ export function Room({ state, meId, connected, onVote, onReveal, onReset, onLeav
           </Badge>
           <Button variant="ghost" size="icon" className="size-8" onClick={copyCode} aria-label="Copy room code">
             {copied ? <Check className="text-success" /> : <Copy />}
+          </Button>
+          <Button variant="ghost" size="icon" className="size-8" onClick={copyLink} aria-label="Copy invite link">
+            {copiedLink ? <Check className="text-success" /> : <Link2 />}
           </Button>
         </div>
         <div className="ml-auto flex items-center gap-3">
