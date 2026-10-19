@@ -65,13 +65,14 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 | `00597e2` | chore(deps): pin lucide-react 1.59.0, socket.io-client server devDep, ignore .idea/ |
 | `ee4b035` | test(server): realtime two-client e2e suite |
 | `1ab93b2` | ci: GitHub Actions lint/test/build on PR + main |
+| `5ba773c` | docs: mark browser QA passed, Phase 2 hardening complete |
 
 ## Next steps
 
 ### Phase 1 — Ship it (the only agreed-but-unstarted work)
 
 1. ~~Manual browser QA~~ — **done 2026-10-19**, two-tab walkthrough passed (see "Verified").
-2. **Push to GitHub** (no remote yet; `git remote add origin …` + push — ask user for the org/repo name and confirm before creating it). The CI workflow (`.github/workflows/ci.yml`) activates on push.
+2. ~~Push to GitHub~~ — **done 2026-10-19**: public repo `https://github.com/markross/scrumpokerqwen` (remote `origin`, `main` tracked). First CI run passed (`39229593283`, 21 s). Token needed `workflow` scope for the CI file (`gh auth refresh -s workflow`).
 3. **Deploy to Render** via Blueprint from `render.yaml` (config already in repo, untested against a real Render account). Check: public URL loads, WebSocket upgrade succeeds (`/healthz`, then a two-player sanity session), free-tier cold start behaviour (in-memory state lost on sleep — acceptable, documented).
 4. Post-deploy smoke: same flow from two physical devices on the public URL.
 
@@ -92,7 +93,7 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 
 ### Open questions for the user
 
-1. GitHub repo name/org for the push, and does their Render account exist / which region?
+1. ~~GitHub repo name/org for the push~~ — resolved: `markross/scrumpokerqwen` (public). Does their Render account exist / which region?
 2. Is per-round story text needed for the team's workflow? (Phase 3's top candidate.)
 3. How many concurrent teams ≈ the deployment must support? (In-memory single-instance is fine for a handful of small rooms.)
 
