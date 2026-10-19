@@ -5,7 +5,17 @@ Scrum Poker — real-time planning poker. npm workspaces: `server` (Express 5 + 
 ## Start here
 
 - `HANDOFF.md` is the authoritative session state: agreed spec (do not regress), architecture invariants, backlog. Phase 3 features are NOT agreed — confirm with the user before building them.
-- Git: branch `main`, no remote. Do not create/push a GitHub repo or deploy without user confirmation (see HANDOFF "Open questions").
+- Git: branch `main`, remote `origin` = `https://github.com/markross/scrumpokerqwen` (public). `main` is protected: PRs required, `checks` must pass, no direct pushes (enforced on admins too).
+
+## Workflow: every change ships as a PR
+
+All new features (and tooling/docs changes) go through a PR for the user to review — never push to `main` directly:
+
+1. Branch from up-to-date `main`: `git checkout -b feat/<name>` (use `feat|fix|chore|docs|test|ci:` prefixes).
+2. Commit, `git push -u origin <branch>`, open the PR with `gh pr create` (fill the PR template; note which spec/HANDOFF item it implements).
+3. Wait for CI green, then **leave review/merge to the user** — do not merge unless explicitly asked.
+
+Phase 3 features are NOT agreed — confirm with the user before building them. Do not create additional repos or deploy without user confirmation (see HANDOFF "Open questions").
 
 ## Commands (Node >= 24 required)
 
