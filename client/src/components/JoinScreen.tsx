@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { readStoredName } from '@/useRoom'
 
 interface JoinScreenProps {
@@ -33,7 +34,10 @@ export function JoinScreen({ onCreate, onJoin, error, busy }: JoinScreenProps): 
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-4">
+    <main className="relative flex min-h-screen items-center justify-center p-4">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
           <Badge variant="secondary" className="mb-2 size-12 rounded-xl p-0 [&_svg]:size-6">

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog'
 import { PlayerCard } from '@/components/PlayerCard'
 import { SummaryBar } from '@/components/SummaryBar'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import { VoteDeck } from '@/components/VoteDeck'
 
 interface RoomProps {
@@ -57,6 +58,7 @@ export function Room({ state, meId, connected, onVote, onReveal, onReset, onLeav
           </Button>
         </div>
         <div className="ml-auto flex items-center gap-3">
+          <ThemeToggle />
           {!connected ? (
             <Badge variant="warning">
               <WifiOff />
