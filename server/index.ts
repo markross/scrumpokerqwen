@@ -18,8 +18,8 @@ interface SocketData {
 type RoomSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>
 
 const app = express()
-const httpServer = createServer(app)
-const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(
+export const httpServer = createServer(app)
+export const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(
   httpServer,
   {
     cors: {
@@ -149,6 +149,8 @@ const sweeper = setInterval(() => rooms.sweepStaleRooms(store), 10 * 60 * 1000)
 sweeper.unref()
 
 const port = Number(process.env.PORT ?? 3001)
-httpServer.listen(port, () => {
-  console.log(`Scrum Poker server listening on http://localhost:${port}`)
-})
+if (!process.env.VITEST) {
+  httpServer.listen(port, () => {
+    console.log(`Scrum Poker server listening on http://localhost:${port}`)
+  })
+}
