@@ -42,5 +42,5 @@ Phase 3 features are NOT agreed — confirm with the user before building them. 
 ## Misc
 
 - Env: `PORT` (default 3001), `CORS_ORIGIN` (comma-separated allowlist; leave unset for dev and the single-service production deploy), `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` (both set = durable rooms; unset = memory-only, e.g. dev/tests).
-- Deploy: `render.yaml` Blueprint + multi-stage `Dockerfile` (runs `npm start` as non-root). In-memory state: restarts wipe rooms — documented and accepted for v0.1.
+- Deploy: `render.yaml` Blueprint + multi-stage `Dockerfile` (runs `npm start` as non-root). Rooms are memory-only unless `UPSTASH_REDIS_REST_URL`/`_TOKEN` are set in the dashboard (`sync:false` in render.yaml) — with them, state survives restarts (see README "Environment").
 - `server/index.ts` exports `httpServer`/`io` and only auto-listens when `process.env.VITEST` is unset — `server/realtime.test.ts` boots it on port 0. Don't remove the guard or the exports.
