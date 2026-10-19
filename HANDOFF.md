@@ -1,7 +1,7 @@
 # Scrum Poker — Session Handoff
 
 > Read this first in a new session to pick up exactly where we left off.
-> Last updated: 2026-10-19. Repo: `/Volumes/Sensitive/scrumpokerqwen` (git `main`, clean tree, 6 commits).
+> Last updated: 2026-10-19. Repo: `/Volumes/Sensitive/scrumpokerqwen` (git `main`, clean tree, 11 commits).
 
 ## Where we are: v0.1 COMPLETE ✅
 
@@ -33,14 +33,14 @@ Node 24 LTS · Express 5 · socket.io 4 · TypeScript 5 strict (shared event con
 
 ### Verified (all green at last run)
 
-- `npm test` — 24/24 Vitest unit tests (`server/rooms.test.ts`: secrecy, reveal, reset, late join, reconnect, validation, TTL sweep)
+- `npm test` — 27/27 Vitest tests (`server/rooms.test.ts` 24 unit: secrecy, reveal, reset, late join, reconnect, validation, TTL sweep; `server/realtime.test.ts` 3 two-client socket.io e2e: wire-level secrecy, reveal/reset, disconnect/reconnect, leave, bad joins)
 - `npm run lint` — clean; `npm run build` — clean
-- End-to-end realtime script with two socket.io clients: vote secrecy (A's vote `null` to B until reveal, `hasVoted` visible), reveal, reset all correct
+- The throwaway two-client realtime script is now permanent: `server/realtime.test.ts` (runs in `npm test`)
 - Prod server serves built client + SPA routes + healthz
 - `docker build` succeeds; container smoke-tested on port 3006 (healthz + index)
 - `npm run dev` boots both processes, proxy works
 
-**Not yet verified:** actual human browser walkthrough (visual QA of flip animation/mobile layout/flow) — worth doing before/after deploy.
+- Human browser walkthrough (two tabs, dev = :5173): name entry → create/join → vote secrecy verified in devtools WS frames (peer `vote:null`, `hasVoted` visible) → reveal flip → summary → reset → mid-round refresh keeps seat+vote → late join → leave/confirm — **passed 2026-10-19**
 
 ### Commands
 
@@ -60,22 +60,27 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 | `387c554` | feat: client scaffold (Vite/React/Tailwind/shadcn primitives) |
 | `7d8a5e5` | feat: join screen + voting room |
 | `e883b8a` | chore(deploy): Dockerfile, render.yaml, README |
+| `d6b3910` | docs: session handoff with status and next-steps plan |
+| `ade7e7e` | docs: agent-facing repo notes (AGENTS.md) |
+| `00597e2` | chore(deps): pin lucide-react 1.59.0, socket.io-client server devDep, ignore .idea/ |
+| `ee4b035` | test(server): realtime two-client e2e suite |
+| `1ab93b2` | ci: GitHub Actions lint/test/build on PR + main |
 
 ## Next steps
 
 ### Phase 1 — Ship it (the only agreed-but-unstarted work)
 
-1. **Manual browser QA** — two devices/tabs: name entry → create/join → vote secrecy (check devtools that no peer vote arrives in `room:state` before reveal) → reveal flip → summary → reset → leave/confirm → mid-round refresh keeps seat+vote.
-2. **Push to GitHub** (no remote yet; `git remote add origin …` + push — ask user for the org/repo name and confirm before creating it).
+1. ~~Manual browser QA~~ — **done 2026-10-19**, two-tab walkthrough passed (see "Verified").
+2. **Push to GitHub** (no remote yet; `git remote add origin …` + push — ask user for the org/repo name and confirm before creating it). The CI workflow (`.github/workflows/ci.yml`) activates on push.
 3. **Deploy to Render** via Blueprint from `render.yaml` (config already in repo, untested against a real Render account). Check: public URL loads, WebSocket upgrade succeeds (`/healthz`, then a two-player sanity session), free-tier cold start behaviour (in-memory state lost on sleep — acceptable, documented).
 4. Post-deploy smoke: same flow from two physical devices on the public URL.
 
-### Phase 2 — Hardening (small, high value)
+### Phase 2 — Hardening
 
-- **Pin `lucide-react`** (currently `"latest"` in `client/package.json`) to the installed version for reproducible builds.
-- **CI**: GitHub Actions workflow running `npm ci && npm run lint && npm test && npm run build` on PR/main.
-- **Automated e2e**: socket.io client tests against a booted server (port the throwaway two-client script into `server/realtime.test.ts`), or Playwright for the UI flow.
-- Consider rate-limiting `room:create` / join (public-internet exposure).
+- ✅ **Pin `lucide-react`** — pinned to `1.59.0` (`00597e2`).
+- ✅ **CI** — `.github/workflows/ci.yml`: `npm ci && lint && test && build` on PR/main (`1ab93b2`).
+- ✅ **Automated e2e** — `server/realtime.test.ts`: three two-client socket.io tests against the booted server (`ee4b035`). `server/index.ts` now exports `httpServer`/`io` and skips auto-listen when `process.env.VITEST` is set — prod boot unchanged (`npm start` smoke-tested). Playwright UI tests remain an optional extra.
+- Consider rate-limiting `room:create` / join (public-internet exposure) — still open, do before heavy public use.
 
 ### Phase 3 — Feature backlog (from earlier conversations; NOT agreed — confirm before building)
 

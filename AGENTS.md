@@ -11,7 +11,7 @@ Scrum Poker — real-time planning poker. npm workspaces: `server` (Express 5 + 
 
 - `npm run dev` — tsx watch server (:3001) + Vite (:5173). Vite proxies `/socket.io` with `ws: true`, so the client is same-origin in dev.
 - `npm run lint && npm test && npm run build` — full check. There is no root typecheck script; types are checked inside `npm run build` (client = `tsc --noEmit` + vite build; server = `tsc`).
-- Single test file: `npx vitest run server/rooms.test.ts`. Vitest only includes `server/**/*.test.ts` (node env) — client tests would silently not run; no e2e yet.
+- Single test file: `npx vitest run server/rooms.test.ts`. Vitest only includes `server/**/*.test.ts` (node env) — client tests would silently not run. E2E = `server/realtime.test.ts` (real socket.io clients vs booted server); no Playwright yet.
 - `npm start` runs `node server/dist/server/index.js` — note the doubled `server/` segment below.
 
 ## Build / ESM gotchas
@@ -32,4 +32,4 @@ Scrum Poker — real-time planning poker. npm workspaces: `server` (Express 5 + 
 
 - Env: `PORT` (default 3001), `CORS_ORIGIN` (comma-separated allowlist; leave unset for dev and the single-service production deploy).
 - Deploy: `render.yaml` Blueprint + multi-stage `Dockerfile` (runs `npm start` as non-root). In-memory state: restarts wipe rooms — documented and accepted for v0.1.
-- Known issue: `lucide-react` is `"latest"` (unpinned) in `client/package.json`.
+- `server/index.ts` exports `httpServer`/`io` and only auto-listens when `process.env.VITEST` is unset — `server/realtime.test.ts` boots it on port 0. Don't remove the guard or the exports.
