@@ -66,6 +66,7 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 | `ee4b035` | test(server): realtime two-client e2e suite |
 | `1ab93b2` | ci: GitHub Actions lint/test/build on PR + main |
 | `5ba773c` | docs: mark browser QA passed, Phase 2 hardening complete |
+| `9cee10c` | ci: bump checkout/setup-node actions; docs: record GitHub push + CI green |
 
 ## Next steps
 
@@ -79,7 +80,8 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 ### Phase 2 — Hardening
 
 - ✅ **Pin `lucide-react`** — pinned to `1.59.0` (`00597e2`).
-- ✅ **CI** — `.github/workflows/ci.yml`: `npm ci && lint && test && build` on PR/main (`1ab93b2`).
+- ✅ **CI** — `.github/workflows/ci.yml`: `npm ci && lint && test && build` on PR/main (`1ab93b2`). Actions bumped to `checkout@v5`/`setup-node@v6` (`9cee10c`).
+- ✅ **PR review workflow** — `main` protected via GitHub API: PRs required, CI `checks` must pass (and be up to date), force-push/delete blocked, enforced on admins too. Every change (features, tooling, docs) ships as a PR opened with `gh pr create` for the user to review/merge — see AGENTS.md "Workflow" and `.github/PULL_REQUEST_TEMPLATE.md`.
 - ✅ **Automated e2e** — `server/realtime.test.ts`: three two-client socket.io tests against the booted server (`ee4b035`). `server/index.ts` now exports `httpServer`/`io` and skips auto-listen when `process.env.VITEST` is set — prod boot unchanged (`npm start` smoke-tested). Playwright UI tests remain an optional extra.
 - Consider rate-limiting `room:create` / join (public-internet exposure) — still open, do before heavy public use.
 
