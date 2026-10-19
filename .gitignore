@@ -4,6 +4,7 @@ client/dist/
 server/dist/
 *.log
 .DS_Store
+.idea/
 .env
 .env.*
 coverage/
