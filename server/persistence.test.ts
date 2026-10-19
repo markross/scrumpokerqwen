@@ -92,6 +92,26 @@ describe('UpstashRepository', () => {
     client.hgetall.mockRejectedValue(new Error('redis down'))
     expect(await repo.loadAll()).toEqual([])
   })
+
+  it('loadAll accepts pre-parsed hash values (what the real @upstash/redis client returns)', async () => {
+    const client = fakeClient()
+    // The real client's hgetall JSON-parses each hash value before handing it over.
+    client.hgetall.mockResolvedValue({
+      AAAAA: snapshot('AAAAA', 'Team Alpha'),
+      Nonsense: { unexpected: true },
+      '42': 42
+    })
+    const repo = new UpstashRepository(client, 5, { warn: () => {} })
+    const all = await repo.loadAll()
+    expect(all.map((s) => s.code)).toEqual(['AAAAA'])
+  })
+
+  it('loadAll treats an empty hash (null result) as no rooms', async () => {
+    const client = fakeClient()
+    client.hgetall.mockResolvedValue(null)
+    const repo = new UpstashRepository(client, 5, { warn: () => {} })
+    expect(await repo.loadAll()).toEqual([])
+  })
 })
 
 describe('createRepository', () => {

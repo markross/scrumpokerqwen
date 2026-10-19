@@ -71,11 +71,21 @@ export class UpstashRepository implements RoomRepository {
       const rows = ((await this.client.hgetall(ROOMS_KEY)) ?? {}) as Record<string, unknown>
       const snapshots: RoomSnapshot[] = []
       for (const raw of Object.values(rows)) {
-        if (typeof raw !== 'string') continue
-        try {
-          snapshots.push(JSON.parse(raw) as RoomSnapshot)
-        } catch {
-          this.log.warn('Skipping unreadable room snapshot.')
+        // The real @upstash/redis client JSON-parses hash values (pre-parsed
+        // objects); other backends may hand back the raw JSON string.
+        let candidate: unknown = raw
+        if (typeof raw === 'string') {
+          try {
+            candidate = JSON.parse(raw)
+          } catch {
+            this.log.warn('Skipping unreadable room snapshot.')
+            continue
+          }
+        }
+        if (candidate && typeof candidate === 'object' && typeof (candidate as RoomSnapshot).code === 'string') {
+          snapshots.push(candidate as RoomSnapshot)
+        } else {
+          this.log.warn('Skipping room snapshot with unexpected shape.')
         }
       }
       return snapshots
