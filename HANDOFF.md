@@ -95,8 +95,8 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 
 ### Open questions for the user
 
-1. ~~GitHub repo name/org for the push~~ — resolved: `markross/scrumpokerqwen` (public). Does their Render account exist / which region?
-2. Is per-round story text needed for the team's workflow? (Phase 3's top candidate.)
+1. ~~GitHub repo name/org for the push~~ — resolved: `markross/scrumpokerqwen` (public). ~~Render account~~ — exists; live on free plan, oregon (`https://scrumpoker-195h.onrender.com`).
+2. ~~Per-round story text?~~ — **answered 2026-10-19: no / not yet.** Stays in Phase 3 backlog, not to be built without a new yes.
 3. How many concurrent teams ≈ the deployment must support? (In-memory single-instance is fine for a handful of small rooms.)
 
 ### Known limitations (documented, accepted for v0.1)
