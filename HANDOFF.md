@@ -1,7 +1,7 @@
 # Scrum Poker — Session Handoff
 
 > Read this first in a new session to pick up exactly where we left off.
-> Last updated: 2026-10-19. Repo: `/Volumes/Sensitive/scrumpokerqwen` (git `main`, clean tree, 11 commits).
+> Last updated: 2026-10-19. Repo: `/Volumes/Sensitive/scrumpokerqwen` (git `main`; remote `origin` = public `github.com/markross/scrumpokerqwen`, `main` PR-protected). Live: `https://scrumpoker-195h.onrender.com`.
 
 ## Where we are: v0.1 COMPLETE ✅
 
@@ -74,8 +74,8 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 
 1. ~~Manual browser QA~~ — **done 2026-10-19**, two-tab walkthrough passed (see "Verified").
 2. ~~Push to GitHub~~ — **done 2026-10-19**: public repo `https://github.com/markross/scrumpokerqwen` (remote `origin`, `main` tracked). First CI run passed (`39229593283`, 21 s). Token needed `workflow` scope for the CI file (`gh auth refresh -s workflow`).
-3. **Deploy to Render** via Blueprint from `render.yaml` (config already in repo, untested against a real Render account). Check: public URL loads, WebSocket upgrade succeeds (`/healthz`, then a two-player sanity session), free-tier cold start behaviour (in-memory state lost on sleep — acceptable, documented).
-4. Post-deploy smoke: same flow from two physical devices on the public URL.
+3. ~~Deploy to Render~~ — **done 2026-10-19**: Blueprint live at **`https://scrumpoker-195h.onrender.com`** (free plan, oregon, Docker runtime, healthz wired; created from the dashboard by the user).
+4. **Post-deploy smoke** — automated half **passed 2026-10-19** (throwaway script, not committed): `/healthz` 200 + `{"ok":true}`, and two real socket.io clients over the public URL exercised create → join → vote secrecy (peer view `vote:null`, `hasVoted:true`) → reveal (8/null exposed) → reset-by-non-creator. **Remaining: human two-physical-devices pass** on the public URL. Cold start: free tier sleeps after idle; first request pays spin-up and in-memory rooms are lost on sleep — documented/accepted.
 
 ### Phase 2 — Hardening
 
