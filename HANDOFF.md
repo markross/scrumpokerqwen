@@ -3,9 +3,9 @@
 > Read this first in a new session to pick up exactly where we left off.
 > Last updated: 2026-10-19. Repo: `/Volumes/Sensitive/scrumpokerqwen` (git `main`; remote `origin` = public `github.com/markross/scrumpokerqwen`, `main` PR-protected). Live: `https://scrumpoker-195h.onrender.com`.
 
-## Where we are: v0.1 COMPLETE ✅
+## Where we are: v0.1 COMPLETE ✅ — deployed & live-verified
 
-A fully working real-time planning poker app, built to an agreed spec, verified, and ready to deploy.
+A fully working real-time planning poker app, built to an agreed spec, verified, and live at `https://scrumpoker-195h.onrender.com`. Phase 1 (ship it) is fully done, including the human two-device pass on the public URL.
 
 ### Agreed spec (from clarification Q&A — do not regress)
 
@@ -67,15 +67,19 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 | `1ab93b2` | ci: GitHub Actions lint/test/build on PR + main |
 | `5ba773c` | docs: mark browser QA passed, Phase 2 hardening complete |
 | `9cee10c` | ci: bump checkout/setup-node actions; docs: record GitHub push + CI green |
+| `673c7c0` | chore: PR-review workflow (branch protection via API, PR template, docs) — PR #1 |
+| `02c414d` | docs: record Render deploy live + production socket smoke — PR #2 |
 
 ## Next steps
 
-### Phase 1 — Ship it (the only agreed-but-unstarted work)
+Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user decision — see below). Next actionable work = agree Phase 3 scope with the user (open questions 2–3).
+
+### Phase 1 — Ship it ✅ COMPLETE
 
 1. ~~Manual browser QA~~ — **done 2026-10-19**, two-tab walkthrough passed (see "Verified").
 2. ~~Push to GitHub~~ — **done 2026-10-19**: public repo `https://github.com/markross/scrumpokerqwen` (remote `origin`, `main` tracked). First CI run passed (`39229593283`, 21 s). Token needed `workflow` scope for the CI file (`gh auth refresh -s workflow`).
 3. ~~Deploy to Render~~ — **done 2026-10-19**: Blueprint live at **`https://scrumpoker-195h.onrender.com`** (free plan, oregon, Docker runtime, healthz wired; created from the dashboard by the user).
-4. **Post-deploy smoke** — automated half **passed 2026-10-19** (throwaway script, not committed): `/healthz` 200 + `{"ok":true}`, and two real socket.io clients over the public URL exercised create → join → vote secrecy (peer view `vote:null`, `hasVoted:true`) → reveal (8/null exposed) → reset-by-non-creator. **Remaining: human two-physical-devices pass** on the public URL. Cold start: free tier sleeps after idle; first request pays spin-up and in-memory rooms are lost on sleep — documented/accepted.
+4. ~~Post-deploy smoke~~ — **done 2026-10-19**: automated half passed (throwaway script, not committed: `/healthz` 200 + `{"ok":true}`; two real socket.io clients over the public URL exercised create → join → vote secrecy (peer view `vote:null`, `hasVoted:true`) → reveal (8/null exposed) → reset-by-non-creator), and the **human two-physical-devices pass on the public URL passed** (user, real devices). Cold start: free tier sleeps after idle; first request pays spin-up and in-memory rooms are lost on sleep — documented/accepted.
 
 ### Phase 2 — Hardening
 
@@ -83,7 +87,7 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 - ✅ **CI** — `.github/workflows/ci.yml`: `npm ci && lint && test && build` on PR/main (`1ab93b2`). Actions bumped to `checkout@v5`/`setup-node@v6` (`9cee10c`).
 - ✅ **PR review workflow** — `main` protected via GitHub API: PRs required, CI `checks` must pass (and be up to date), force-push/delete blocked, enforced on admins too. Every change (features, tooling, docs) ships as a PR opened with `gh pr create` for the user to review/merge — see AGENTS.md "Workflow" and `.github/PULL_REQUEST_TEMPLATE.md`.
 - ✅ **Automated e2e** — `server/realtime.test.ts`: three two-client socket.io tests against the booted server (`ee4b035`). `server/index.ts` now exports `httpServer`/`io` and skips auto-listen when `process.env.VITEST` is set — prod boot unchanged (`npm start` smoke-tested). Playwright UI tests remain an optional extra.
-- Consider rate-limiting `room:create` / join (public-internet exposure) — still open, do before heavy public use.
+- **Rate-limit `room:create` / join** — **deferred 2026-10-19** (user decision): low risk at current scale (Render free-tier limits + 30-player cap + 24 h TTL sweep make abuse unlikely); revisit before heavy public use. Likely shape: pure token bucket keyed by client IP, wired in `server/index.ts` (keep `rooms.ts` pure).
 
 ### Phase 3 — Feature backlog (from earlier conversations; NOT agreed — confirm before building)
 
@@ -95,7 +99,7 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 
 ### Open questions for the user
 
-1. ~~GitHub repo name/org for the push~~ — resolved: `markross/scrumpokerqwen` (public). Does their Render account exist / which region?
+1. ~~GitHub repo name/org for the push; Render account/region~~ — resolved: `markross/scrumpokerqwen` (public); Render free plan, oregon, live.
 2. Is per-round story text needed for the team's workflow? (Phase 3's top candidate.)
 3. How many concurrent teams ≈ the deployment must support? (In-memory single-instance is fine for a handful of small rooms.)
 
