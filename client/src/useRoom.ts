@@ -59,8 +59,9 @@ export interface RoomApi {
   busy: boolean
   connected: boolean
   meId: string
-  createRoom: (name: string) => void
+  createRoom: (name: string, roomName?: string) => void
   joinRoom: (code: string, name: string) => void
+  joinByName: (roomName: string, name: string) => void
   vote: (value: DeckValue) => void
   reveal: () => void
   reset: () => void
@@ -100,10 +101,10 @@ export function useRoom(): RoomApi {
   }, [socket])
 
   const createRoom = useCallback(
-    (name: string) => {
+    (name: string, roomName?: string) => {
       setError(null)
       setBusy(true)
-      socket.emit('room:create', { name, playerId: meId }, (result) => {
+      socket.emit('room:create', { name, playerId: meId, roomName }, (result) => {
         if (!result.ok) {
           setBusy(false)
           setError(result.error)
@@ -120,6 +121,22 @@ export function useRoom(): RoomApi {
       setError(null)
       setBusy(true)
       socket.emit('room:join', { code, name, playerId: meId }, (result) => {
+        if (!result.ok) {
+          setBusy(false)
+          setError(result.error)
+          return
+        }
+        saveSession({ code: result.code, name, playerId: meId })
+      })
+    },
+    [socket, meId]
+  )
+
+  const joinByName = useCallback(
+    (roomName: string, name: string) => {
+      setError(null)
+      setBusy(true)
+      socket.emit('room:join', { roomName, name, playerId: meId }, (result) => {
         if (!result.ok) {
           setBusy(false)
           setError(result.error)
@@ -154,5 +171,5 @@ export function useRoom(): RoomApi {
     })
   }, [socket])
 
-  return { room, error, busy, connected, meId, createRoom, joinRoom, vote, reveal, reset, leave }
+  return { room, error, busy, connected, meId, createRoom, joinRoom, joinByName, vote, reveal, reset, leave }
 }

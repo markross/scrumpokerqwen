@@ -8,7 +8,15 @@ export default function App(): ReactElement {
   const api = useRoom()
 
   if (!api.room) {
-    return <JoinScreen onCreate={api.createRoom} onJoin={api.joinRoom} error={api.error} busy={api.busy} />
+    return (
+      <JoinScreen
+        onCreate={api.createRoom}
+        onJoin={api.joinRoom}
+        onJoinByName={api.joinByName}
+        error={api.error}
+        busy={api.busy}
+      />
+    )
   }
 
   return (

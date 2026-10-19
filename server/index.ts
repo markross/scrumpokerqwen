@@ -9,6 +9,7 @@ import type {
   ServerToClientEvents
 } from '../shared/types.js'
 import * as rooms from './rooms.js'
+import { createRepository } from './persistence.js'
 
 interface SocketData {
   code?: string
@@ -29,6 +30,7 @@ export const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<
 )
 
 const store: rooms.Store = new Map()
+export const repository = createRepository()
 
 function broadcast(code: string): void {
   const room = store.get(code)
@@ -38,6 +40,12 @@ function broadcast(code: string): void {
       io.to(player.socketId).emit('room:state', rooms.getView(room, player.id))
     }
   }
+}
+
+/** Queue the room's latest snapshot for durable storage (no-op on socket-only changes). */
+function persist(code: string): void {
+  const room = store.get(code)
+  if (room) repository.save(rooms.serializeRoom(room))
 }
 
 function attach(socket: RoomSocket, code: string, playerId: string): void {
@@ -58,7 +66,7 @@ function detach(socket: RoomSocket): void {
 }
 
 app.get('/healthz', (_req, res) => {
-  res.json({ ok: true, rooms: store.size })
+  res.json({ ok: true, rooms: store.size, persistence: repository.mode })
 })
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -78,12 +86,13 @@ io.on('connection', (socket) => {
       ack({ ok: false, error: 'You are already in a room. Leave it first.' })
       return
     }
-    const result = rooms.createRoom(store, payload.name, payload.playerId)
+    const result = rooms.createRoom(store, payload.name, payload.playerId, payload.roomName)
     if (!result.ok) {
       ack(result)
       return
     }
     attach(socket, result.value.code, payload.playerId)
+    persist(result.value.code)
     ack({ ok: true, code: result.value.code })
     broadcast(result.value.code)
   })
@@ -93,16 +102,19 @@ io.on('connection', (socket) => {
       ack({ ok: false, error: 'You are already in a room. Leave it first.' })
       return
     }
-    if (!payload.code) {
-      ack({ ok: false, error: 'Enter a room code to join.' })
+    if (!payload.code && !payload.roomName) {
+      ack({ ok: false, error: 'Enter a room code or room name to join.' })
       return
     }
-    const result = rooms.joinRoom(store, payload.code, payload.name, payload.playerId)
+    const result = payload.code
+      ? rooms.joinRoom(store, payload.code, payload.name, payload.playerId)
+      : rooms.joinRoomByName(store, payload.roomName!, payload.name, payload.playerId)
     if (!result.ok) {
       ack(result)
       return
     }
     attach(socket, result.value.code, payload.playerId)
+    persist(result.value.code)
     ack({ ok: true, code: result.value.code })
     broadcast(result.value.code)
   })
@@ -111,21 +123,30 @@ io.on('connection', (socket) => {
     const { code, playerId } = socket.data
     if (!code || !playerId) return
     const result = rooms.placeVote(store, code, playerId, payload.value as DeckValue)
-    if (result.ok) broadcast(code)
+    if (result.ok) {
+      persist(code)
+      broadcast(code)
+    }
   })
 
   socket.on('room:reveal', () => {
     const { code } = socket.data
     if (!code) return
     const result = rooms.revealRoom(store, code)
-    if (result.ok) broadcast(code)
+    if (result.ok) {
+      persist(code)
+      broadcast(code)
+    }
   })
 
   socket.on('room:reset', () => {
     const { code } = socket.data
     if (!code) return
     const result = rooms.resetRoom(store, code)
-    if (result.ok) broadcast(code)
+    if (result.ok) {
+      persist(code)
+      broadcast(code)
+    }
   })
 
   socket.on('player:leave', (ack) => {
@@ -133,6 +154,7 @@ io.on('connection', (socket) => {
     if (code && playerId) {
       rooms.removePlayer(store, code, playerId)
       detach(socket)
+      persist(code)
       broadcast(code)
     }
     ack({ ok: true })
@@ -145,12 +167,34 @@ io.on('connection', (socket) => {
   })
 })
 
-const sweeper = setInterval(() => rooms.sweepStaleRooms(store), 10 * 60 * 1000)
+const sweeper = setInterval(() => {
+  for (const code of rooms.sweepStaleRooms(store)) repository.remove(code)
+}, 10 * 60 * 1000)
 sweeper.unref()
 
 const port = Number(process.env.PORT ?? 3001)
 if (!process.env.VITEST) {
-  httpServer.listen(port, () => {
-    console.log(`Scrum Poker server listening on http://localhost:${port}`)
-  })
+  void (async () => {
+    try {
+      const snapshots = await repository.loadAll()
+      rooms.hydrateStore(store, snapshots)
+      if (snapshots.length) console.log(`Restored ${snapshots.length} room(s) from ${repository.mode}`)
+    } catch (err) {
+      console.warn('Could not restore rooms on startup; starting empty.', err)
+    }
+    httpServer.listen(port, () => {
+      console.log(`Scrum Poker server listening on http://localhost:${port} (persistence: ${repository.mode})`)
+    })
+  })()
+
+  let shuttingDown = false
+  const shutdown = async (): Promise<void> => {
+    if (shuttingDown) return
+    shuttingDown = true
+    httpServer.close()
+    await repository.close()
+    process.exit(0)
+  }
+  process.once('SIGTERM', () => void shutdown())
+  process.once('SIGINT', () => void shutdown())
 }

@@ -6,8 +6,10 @@ together.
 
 ## How it works
 
-1. **Join** — one player enters a name and creates a room; share the 5-character
-   code. Others enter their name + the code to join (late joining is fine).
+1. **Join** — one player enters a name (and optionally a room name like
+   "Team Alpha") and creates a room. Share the 5-character code, a
+   `?join=CODE` / `?room=NAME` invite link, or just tell people the room
+   name — the join screen can search by code *or* name (late joining is fine).
 2. **Vote** — each player picks `0 1 2 3 5 8 13 21 ? ∞`. Others only see
    *whether* you voted, never *what* you voted. Votes are changeable until reveal.
 3. **Reveal** — anyone can press **Reveal votes**; cards flip and a summary shows
@@ -43,15 +45,36 @@ npm run dev
 ## Architecture
 
 - `shared/types.ts` — domain types + socket event contracts used by both sides.
+- `shared/naming.ts` — pure room-name normalization/validation (shared so the
+  server-side tests cover the same rules the client uses).
 - `server/rooms.ts` — pure, unit-tested room state machine. The server is the
   single source of truth; it emits each player their own **sanitized** view,
   so other players' votes never reach the network before reveal.
-- `server/index.ts` — Express (static hosting + `/healthz`) and socket.io wiring.
+- `server/persistence.ts` — `RoomRepository` seam for durable room snapshots:
+  `MemoryRepository` (default, process-local) or `UpstashRepository`
+  (Redis via Upstash REST, coalesced writes, failures logged never fatal).
+- `server/index.ts` — Express (static hosting + `/healthz`) and socket.io
+  wiring; hydrates the store from the repository before listening and queues
+  snapshots after every meaningful mutation.
 - `client/` — React app: `useRoom` socket hook, JoinScreen, Room, PlayerCard
   (flip animation), VoteDeck, SummaryBar.
 
 Players survive a page refresh: identity lives in `sessionStorage` and the
 server keeps their seat (and vote) until they explicitly leave.
+
+## Environment
+
+| Variable                   | Default | Purpose                                             |
+| -------------------------- | ------- | --------------------------------------------------- |
+| `PORT`                     | `3001`  | HTTP + socket.io port                               |
+| `CORS_ORIGIN`              | unset   | Comma-separated socket.io origin allowlist          |
+| `UPSTASH_REDIS_REST_URL`   | unset   | With `TOKEN`: rooms persist across restarts         |
+| `UPSTASH_REDIS_REST_TOKEN` | unset   | (Upstash REST credentials; both must be set)        |
+
+Without the Upstash variables the server runs exactly like before: in-memory
+rooms only. With them, every room (named or not) is snapshotted to Redis,
+restored on boot, and **named rooms never expire** — a team can revisit
+"Team Alpha" any time in the future. Unnamed rooms keep the 24 h stale sweep.
 
 ## Deployment (Render)
 
@@ -66,5 +89,7 @@ docker build -t scrumpoker .
 docker run --rm -p 3001:3001 scrumpoker
 ```
 
-> Note: state is in-memory. A server restart clears rooms (players can rejoin
-> with the same code once the room is recreated by its creator).
+> Note: without `UPSTASH_REDIS_REST_URL`/`_TOKEN` state is in-memory and a
+> server restart clears rooms. Set both (e.g. a free [Upstash](https://upstash.com)
+> Redis database) to make rooms — especially named ones — durable across
+> restarts and redeploys. `/healthz` reports the active `persistence` mode.

@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogTrigger
 } from '@/components/ui/dialog'
-import { shareLinkForCode } from '@/lib/share'
+import { shareLinkForCode, shareLinkForName } from '@/lib/share'
 import { PlayerCard } from '@/components/PlayerCard'
 import { SummaryBar } from '@/components/SummaryBar'
 import { ThemeToggle } from '@/components/ThemeToggle'
@@ -45,7 +45,8 @@ export function Room({ state, meId, connected, onVote, onReveal, onReset, onLeav
   }
 
   function copyLink(): void {
-    void navigator.clipboard.writeText(shareLinkForCode(state.code)).then(() => {
+    const link = state.name ? shareLinkForName(state.name) : shareLinkForCode(state.code)
+    void navigator.clipboard.writeText(link).then(() => {
       setCopiedLink(true)
       setTimeout(() => setCopiedLink(false), 1500)
     })
@@ -56,7 +57,7 @@ export function Room({ state, meId, connected, onVote, onReveal, onReset, onLeav
       <header className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
           <Spade className="text-primary size-5" />
-          <h1 className="text-lg font-semibold">Scrum Poker</h1>
+          <h1 className="text-lg font-semibold">{state.name ?? 'Scrum Poker'}</h1>
         </div>
         <div className="flex items-center gap-1.5">
           <Badge variant="outline" className="font-mono text-sm tracking-[0.2em]">
