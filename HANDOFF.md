@@ -72,7 +72,7 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 
 ## Next steps
 
-Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user decision — see below). Next actionable work = agree Phase 3 scope with the user (open question 3 + pick from the remaining backlog; story text ruled out 2026-10-19).
+Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user decision — see below). **Phase 3 partially agreed 2026-10-19**: user approved **share links (`?join=CODE`)** and **light/dark theme toggle** — shipping as `feat/share-links` + `feat/theme-toggle` PRs. Scale answered (open question 3): **a handful of small rooms** → in-memory single instance confirmed sufficient; persistence/Redis and rate-limiting stay deferred. Remaining backlog items below are still NOT agreed — confirm before building.
 
 ### Phase 1 — Ship it ✅ COMPLETE
 
@@ -89,19 +89,20 @@ Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user 
 - ✅ **Automated e2e** — `server/realtime.test.ts`: three two-client socket.io tests against the booted server (`ee4b035`). `server/index.ts` now exports `httpServer`/`io` and skips auto-listen when `process.env.VITEST` is set — prod boot unchanged (`npm start` smoke-tested). Playwright UI tests remain an optional extra.
 - **Rate-limit `room:create` / join** — **deferred 2026-10-19** (user decision): low risk at current scale (Render free-tier limits + 30-player cap + 24 h TTL sweep make abuse unlikely); revisit before heavy public use. Likely shape: pure token bucket keyed by client IP, wired in `server/index.ts` (keep `rooms.ts` pure).
 
-### Phase 3 — Feature backlog (from earlier conversations; NOT agreed — confirm before building)
+### Phase 3 — Feature backlog (NOT agreed unless marked — confirm before building)
 
 - **Story text per round**: a "current story" field (someone types the story being estimated; shown above the grid) and a lightweight backlog/next-story flow — the natural evolution of "Reset = new round".
-- **Persistence / multi-instance**: move room store behind an interface (in-memory → Redis) if they ever need restart survival or >1 server instance.
-- **Share links**: `?join=CODE` prefill so the creator can send one clickable link.
+- **Persistence / multi-instance**: move room store behind an interface (in-memory → Redis) if they ever need restart survival or >1 server instance. **Deferred 2026-10-19**: scale = a handful of small rooms; in-memory stays.
+- ✅ **Share links** (`?join=CODE` prefill so the creator can send one clickable link) — **agreed 2026-10-19**, PR `feat/share-links` (client-only: `client/src/lib/share.ts`, JoinScreen prefill, Room "Copy invite link").
 - **Spectator/facilitator roles**: only agreed "anyone can control" for now; if a facilitator model is ever wanted, gate reveal/reset server-side.
-- Light/dark theme toggle; sound on reveal; export results CSV.
+- ✅ **Light/dark theme toggle** — **agreed 2026-10-19**, PR `feat/theme-toggle` (client-only: `ThemeToggle` + `lib/theme.ts`; localStorage `scrumpoker.theme`, system default, no-FOUC script in `index.html`).
+- Sound on reveal; export results CSV. (not agreed)
 
 ### Open questions for the user
 
 1. ~~GitHub repo name/org for the push~~ — resolved: `markross/scrumpokerqwen` (public). ~~Render account~~ — exists; live on free plan, oregon (`https://scrumpoker-195h.onrender.com`).
 2. ~~Per-round story text?~~ — **answered 2026-10-19: no / not yet.** Stays in Phase 3 backlog, not to be built without a new yes.
-3. How many concurrent teams ≈ the deployment must support? (In-memory single-instance is fine for a handful of small rooms.)
+3. ~~How many concurrent teams ≈ the deployment must support?~~ — **answered 2026-10-19: a handful of small rooms.** In-memory single-instance confirmed adequate; revisit persistence only if the scale answer changes.
 
 ### Known limitations (documented, accepted for v0.1)
 
