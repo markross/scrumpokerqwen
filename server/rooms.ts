@@ -136,8 +136,7 @@ export function joinRoomByName(
 ): Result<Room> {
   const wanted = slugifyRoomName(rawRoomName)
   if (wanted.length === 0) return fail('Enter a room name to join.')
-  const key = wanted
-  const room = [...store.values()].find((other) => other.name !== null && roomNameKey(other.name) === key)
+  const room = [...store.values()].find((other) => other.name !== null && roomNameKey(other.name) === wanted)
   if (!room) return fail(`A room named "${wanted}" was not found. Check the name or create a new room.`)
   return joinExisting(room, name, playerId)
 }
