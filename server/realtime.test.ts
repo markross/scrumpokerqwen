@@ -11,6 +11,16 @@ import { httpServer } from './index.js'
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>
 
+/** Untyped view used to fire malformed packets no typed client would produce. */
+type RawSocket = Socket<
+  Record<string, (...args: unknown[]) => unknown>,
+  Record<string, (...args: unknown[]) => unknown>
+>
+
+function asRaw(socket: ClientSocket): RawSocket {
+  return socket as unknown as RawSocket
+}
+
 let baseUrl = ''
 const sockets: ClientSocket[] = []
 
@@ -231,5 +241,62 @@ describe('named rooms (two socket.io clients)', () => {
     })
     expect(unknown.ok).toBe(false)
     if (!unknown.ok) expect(unknown.error).toMatch(/not found/i)
+  })
+})
+
+describe('malformed packets (raw socket.io clients)', () => {
+  // socket.io dispatches listeners via emitUntyped inside process.nextTick
+  // with no try/catch, so before handler hardening each of these threw an
+  // uncaughtException that killed the whole process for every room.
+  it('never lets a malformed packet take down the server', async () => {
+    const attacker = await connect()
+    const raw = asRaw(attacker)
+
+    raw.emit('room:create') // no payload, no ack
+    raw.emit('room:create', { name: 'M', playerId: 'm0' }) // valid payload, no ack callback
+    raw.emit('room:create', { name: 'M', playerId: 'm1', roomName: 42 }) // non-string roomName
+    raw.emit('room:join', { name: 'M', playerId: 'm2', code: 12345 }) // non-string code
+    raw.emit('room:join', { name: 'M', playerId: 'm3', roomName: {} }) // non-string roomName
+    raw.emit('vote:place') // no payload
+    raw.emit('vote:place', { value: 8 }) // non-string value
+    raw.emit('player:leave') // no ack callback
+
+    // The offending socket stays usable: leave the room the no-ack create joined.
+    expect(await attacker.emitWithAck('player:leave')).toEqual({ ok: true })
+
+    // And the server still answers fresh emitWithAck roundtrips on new sockets.
+    const witness = await connect()
+    const witnessRec = record(witness)
+    const code = unwrap(
+      await witness.emitWithAck('room:create', { name: 'Witness', playerId: 'w1' })
+    )
+    const joiner = await connect()
+    unwrap(await joiner.emitWithAck('room:join', { name: 'Joiner', playerId: 'w2', code }))
+    await witnessRec.until(twoPlayers)
+  })
+
+  it('replies with an error ack instead of going dark on malformed join/create', async () => {
+    const visitor = await connect()
+    const raw = asRaw(visitor)
+
+    const badJoin = (await raw.emitWithAck('room:join', {
+      name: 'M',
+      playerId: 'm4',
+      code: 12345
+    })) as JoinResult
+    expect(badJoin.ok).toBe(false)
+
+    const badCreate = (await raw.emitWithAck('room:create', {
+      name: 7,
+      playerId: 'm5'
+    })) as JoinResult
+    expect(badCreate.ok).toBe(false)
+
+    // Same socket still works once it behaves.
+    const goodCreate = await visitor.emitWithAck('room:create', {
+      name: 'Fine',
+      playerId: 'm6'
+    })
+    expect(goodCreate.ok).toBe(true)
   })
 })
