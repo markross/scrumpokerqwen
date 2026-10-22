@@ -150,10 +150,6 @@ io.on('connection', (socket) => {
 
   onEvent(socket, 'room:join', (payload, ack) => {
     const reply = safeAck(ack)
-    if (socket.data.code) {
-      reply({ ok: false, error: 'You are already in a room. Leave it first.' })
-      return
-    }
     if (!isJoinPayload(payload)) {
       reply({ ok: false, error: 'Malformed request.' })
       return
@@ -167,6 +163,13 @@ io.on('connection', (socket) => {
       : rooms.joinRoomByName(store, payload.roomName!, payload.name, payload.playerId)
     if (!result.ok) {
       reply(result)
+      return
+    }
+    // Re-joining the room this socket is already bound to is a no-op success:
+    // that is exactly what the client's reconnect rejoin does (and it may race a
+    // re-sent buffered join). Switching to a different room still needs a Leave.
+    if (socket.data.code && (socket.data.code !== result.value.code || socket.data.playerId !== payload.playerId)) {
+      reply({ ok: false, error: 'You are already in a room. Leave it first.' })
       return
     }
     attach(socket, result.value.code, payload.playerId)
