@@ -7,9 +7,12 @@ together.
 ## How it works
 
 1. **Join** — one player enters a name (and optionally a room name like
-   "Team Alpha") and creates a room. Share the 5-character code, a
-   `?join=CODE` / `?room=NAME` invite link, or just tell people the room
-   name — the join screen can search by code *or* name (late joining is fine).
+   `Team Alpha`) and creates a room. The room then lives at its own URL —
+   `your.app/team-alpha` (names are slugified into the address; unnamed
+   rooms get `your.app/K7XQM`). Share that invite link, the 5-character
+   code, or just tell people the room name — the join screen can search by
+   code *or* name (late joining is fine). Room names use letters, numbers,
+   spaces and hyphens.
 2. **Vote** — each player picks `0 1 2 3 5 8 13 21 ? ∞`. Others only see
    *whether* you voted, never *what* you voted. Votes are changeable until reveal.
 3. **Reveal** — anyone can press **Reveal votes**; cards flip and a summary shows
@@ -45,8 +48,11 @@ npm run dev
 ## Architecture
 
 - `shared/types.ts` — domain types + socket event contracts used by both sides.
-- `shared/naming.ts` — pure room-name normalization/validation (shared so the
-  server-side tests cover the same rules the client uses).
+- `shared/naming.ts` — pure room-name rules shared so the server-side tests
+  cover the same rules the client uses: room names slugify (`Team Alpha` →
+  `team-alpha`) and the slug is the room's identity (uniqueness, join-by-name
+  lookup, and URL path). Creation also rejects code-shaped and reserved names
+  so a URL segment is never ambiguous.
 - `server/rooms.ts` — pure, unit-tested room state machine. The server is the
   single source of truth; it emits each player their own **sanitized** view,
   so other players' votes never reach the network before reveal.
@@ -56,8 +62,10 @@ npm run dev
 - `server/index.ts` — Express (static hosting + `/healthz`) and socket.io
   wiring; hydrates the store from the repository before listening and queues
   snapshots after every meaningful mutation.
-- `client/` — React app: `useRoom` socket hook, JoinScreen, Room, PlayerCard
-  (flip animation), VoteDeck, SummaryBar.
+- `client/` — React app: `useRoom` socket hook (the URL path is the source of
+  room intent: deep links join, back/forward re-sync, the address bar tracks
+  the room), `lib/share.ts` path-parsing/share-link helpers, JoinScreen, Room,
+  PlayerCard (flip animation), VoteDeck, SummaryBar.
 
 Players survive a page refresh: identity lives in `sessionStorage` and the
 server keeps their seat (and vote) until they explicitly leave.
