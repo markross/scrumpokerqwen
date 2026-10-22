@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
 import type {
+  ActionResult,
   ClientToServerEvents,
   DeckValue,
   RoomState,
@@ -298,20 +299,35 @@ export function useRoom(): RoomApi {
     [doJoin]
   )
 
+  /**
+   * Room actions report refusals through the ack: a vote that lands during a
+   * concurrent Reveal (or a Reveal after the room expired) used to be discarded
+   * by the server with no reply at all, so the click looked like it worked.
+   */
+  const act = useCallback(
+    (emit: (ack: (result: ActionResult) => void) => void): void => {
+      setError(null)
+      emit((result) => {
+        if (!result.ok) setError(result.error)
+      })
+    },
+    []
+  )
+
   const vote = useCallback(
     (value: DeckValue) => {
-      socket.emit('vote:place', { value })
+      act((ack) => socket.emit('vote:place', { value }, ack))
     },
-    [socket]
+    [socket, act]
   )
 
   const reveal = useCallback(() => {
-    socket.emit('room:reveal')
-  }, [socket])
+    act((ack) => socket.emit('room:reveal', ack))
+  }, [socket, act])
 
   const reset = useCallback(() => {
-    socket.emit('room:reset')
-  }, [socket])
+    act((ack) => socket.emit('room:reset', ack))
+  }, [socket, act])
 
   const leave = useCallback(() => {
     leaveRoom()

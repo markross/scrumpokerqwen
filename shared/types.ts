@@ -32,13 +32,16 @@ export interface JoinPayload {
 
 export type JoinResult = { ok: true; code: string } | { ok: false; error: string }
 
+/** Ack for the room actions that carry no data back (vote/reveal/reset/leave). */
+export type ActionResult = { ok: true } | { ok: false; error: string }
+
 export interface ClientToServerEvents {
   'room:create': (payload: JoinPayload, ack: (result: JoinResult) => void) => void
   'room:join': (payload: JoinPayload, ack: (result: JoinResult) => void) => void
-  'vote:place': (payload: { value: DeckValue }) => void
-  'room:reveal': () => void
-  'room:reset': () => void
-  'player:leave': (ack: (result: { ok: boolean }) => void) => void
+  'vote:place': (payload: { value: DeckValue }, ack: (result: ActionResult) => void) => void
+  'room:reveal': (ack: (result: ActionResult) => void) => void
+  'room:reset': (ack: (result: ActionResult) => void) => void
+  'player:leave': (ack: (result: ActionResult) => void) => void
 }
 
 export interface ServerToClientEvents {
