@@ -34,6 +34,10 @@ export function slugifyRoomName(input: string): string {
  * Case-insensitive identity of a room name — used for uniqueness, join-by-name
  * lookup, and URL paths. Legacy persisted names (e.g. "Team Alpha") slugify to
  * the same key as their URL form, so they stay joinable at `/<slug>`.
+ *
+ * Deliberately its own function even though it is `slugifyRoomName` today:
+ * "what makes two names the same room" and "what the URL looks like" are
+ * separate concepts that can drift apart independently.
  */
 export function roomNameKey(input: string): string {
   return slugifyRoomName(input)
@@ -59,9 +63,4 @@ export function validateNewRoomName(input: string): string | null {
   }
   if (RESERVED_ROOM_NAMES.includes(slug)) return 'That room name is reserved. Pick a different name.'
   return null
-}
-
-/** Convenience wrapper: a name is valid when it passes the creation rules. */
-export function validRoomName(input: string): boolean {
-  return validateNewRoomName(input) === null
 }
