@@ -24,13 +24,15 @@ interface RoomProps {
   state: RoomState
   meId: string
   connected: boolean
+  /** Refused action from the server (e.g. voting during a concurrent Reveal). */
+  error: string | null
   onVote: (value: DeckValue) => void
   onReveal: () => void
   onReset: () => void
   onLeave: () => void
 }
 
-export function Room({ state, meId, connected, onVote, onReveal, onReset, onLeave }: RoomProps): ReactElement {
+export function Room({ state, meId, connected, error, onVote, onReveal, onReset, onLeave }: RoomProps): ReactElement {
   const [copied, setCopied] = useState(false)
   const [copiedLink, setCopiedLink] = useState(false)
   const revealed = state.phase === 'revealed'
@@ -107,6 +109,12 @@ export function Room({ state, meId, connected, onVote, onReveal, onReset, onLeav
           </Dialog>
         </div>
       </header>
+
+      {error ? (
+        <p role="alert" className="text-destructive bg-destructive/10 rounded-md px-3 py-2 text-center text-sm">
+          {error}
+        </p>
+      ) : null}
 
       <section aria-label="Players">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">

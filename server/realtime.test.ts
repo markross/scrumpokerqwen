@@ -3,11 +3,12 @@ import type { AddressInfo } from 'node:net'
 import { io, type Socket } from 'socket.io-client'
 import type {
   ClientToServerEvents,
+  DeckValue,
   JoinResult,
   RoomState,
   ServerToClientEvents
 } from '../shared/types.js'
-import { httpServer } from './index.js'
+import { httpServer, parseCorsOrigins } from './index.js'
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>
 
@@ -122,8 +123,8 @@ describe('realtime flow (two socket.io clients)', () => {
     unwrap(await bob.emitWithAck('room:join', { name: 'Bob', playerId: 'pB', code }))
     await Promise.all([bobRec.until(twoPlayers), aliceRec.until(twoPlayers)])
 
-    alice.emit('vote:place', { value: '8' })
-    bob.emit('vote:place', { value: '13' })
+    alice.emit('vote:place', { value: '8' }, () => {})
+    bob.emit('vote:place', { value: '13' }, () => {})
     await aliceRec.until((s) => byId(s, 'pA')?.vote === '8')
     await bobRec.until((s) => byId(s, 'pA')?.hasVoted === true)
     await aliceRec.until((s) => byId(s, 'pB')?.hasVoted === true)
@@ -136,7 +137,7 @@ describe('realtime flow (two socket.io clients)', () => {
       expect(byId(state, 'pB')?.vote).toBeNull()
     }
 
-    alice.emit('room:reveal')
+    alice.emit('room:reveal', () => {})
     const [aliceRevealed, bobRevealed] = await Promise.all([
       aliceRec.until((s) => s.phase === 'revealed'),
       bobRec.until((s) => s.phase === 'revealed')
@@ -148,7 +149,7 @@ describe('realtime flow (two socket.io clients)', () => {
 
     const idxA = aliceRec.states.length
     const idxB = bobRec.states.length
-    bob.emit('room:reset')
+    bob.emit('room:reset', () => {})
     const freshRound = (s: RoomState): boolean =>
       s.phase === 'voting' &&
       s.players.length === 2 &&
@@ -168,7 +169,7 @@ describe('realtime flow (two socket.io clients)', () => {
     unwrap(await bob.emitWithAck('room:join', { name: 'Bob', playerId: 'pB2', code }))
     await bobRec.until(twoPlayers)
 
-    bob.emit('vote:place', { value: '5' })
+    bob.emit('vote:place', { value: '5' }, () => {})
     await aliceRec.until((s) => byId(s, 'pB2')?.hasVoted === true)
 
     bob.close()
@@ -237,7 +238,7 @@ describe('named rooms (two socket.io clients)', () => {
     await Promise.all([aliceRec.until(twoPlayers), bobRec.until(twoPlayers)])
 
     // Secrecy still holds in a named room.
-    bob.emit('vote:place', { value: '8' })
+    bob.emit('vote:place', { value: '8' }, () => {})
     const sawVote = await aliceRec.until((s) => byId(s, 'nB')?.hasVoted === true)
     expect(byId(sawVote, 'nB')?.vote).toBeNull()
   })
@@ -280,7 +281,7 @@ describe('rejoin after reconnect (two socket.io clients)', () => {
     const bob = await connect()
     unwrap(await bob.emitWithAck('room:join', { name: 'Bob', playerId: 'rB', code }))
     await aliceRec.until(twoPlayers)
-    bob.emit('vote:place', { value: '8' })
+    bob.emit('vote:place', { value: '8' }, () => {})
     await aliceRec.until((s) => byId(s, 'rB')?.hasVoted === true)
 
     bob.on('connect', () => {
@@ -298,7 +299,7 @@ describe('rejoin after reconnect (two socket.io clients)', () => {
     await aliceRec.until((s) => byId(s, 'rB')?.connected === true, seenByAlice)
 
     // Re-attached means in control again (socket.data rebound).
-    bob.emit('room:reveal')
+    bob.emit('room:reveal', () => {})
     const revealed = await aliceRec.until((s) => s.phase === 'revealed', seenByAlice)
     expect(byId(revealed, 'rB')?.vote).toBe('8')
   })
@@ -329,9 +330,69 @@ describe('rejoin after reconnect (two socket.io clients)', () => {
     if (!hopSeat.ok) expect(hopSeat.error).toMatch(/already in a room/i)
 
     // Still bound to the first room, and still in control.
-    bob.emit('room:reveal')
+    bob.emit('room:reveal', () => {})
     const revealed = await bobRec.until((s) => s.phase === 'revealed')
     expect(revealed.code).toBe(code)
+  })
+})
+
+describe('action feedback (ack results)', () => {
+  // Vote/reveal/reset used to discard `result.error` on the floor: no ack in the
+  // contract at all, so a refused action (a vote landing during a concurrent
+  // Reveal, say) looked exactly like an accepted one.
+  it('reports refusals instead of swallowing them', async () => {
+    const alice = await connect()
+    unwrap(await alice.emitWithAck('room:create', { name: 'Alice', playerId: 'fA' }))
+
+    const outsider = await connect()
+    const strayVote = await outsider.emitWithAck('vote:place', { value: '5' })
+    expect(strayVote.ok).toBe(false)
+    if (!strayVote.ok) expect(strayVote.error).toMatch(/not in a room/i)
+    const strayReveal = await outsider.emitWithAck('room:reveal')
+    expect(strayReveal.ok).toBe(false)
+    if (!strayReveal.ok) expect(strayReveal.error).toMatch(/not in a room/i)
+    const strayReset = await outsider.emitWithAck('room:reset')
+    expect(strayReset.ok).toBe(false)
+
+    const offDeck = await alice.emitWithAck('vote:place', { value: '77' as DeckValue })
+    expect(offDeck.ok).toBe(false)
+    if (!offDeck.ok) expect(offDeck.error).toMatch(/unknown vote/i)
+
+    const lateVote = await alice.emitWithAck('room:reveal').then(() =>
+      alice.emitWithAck('vote:place', { value: '8' })
+    )
+    expect(lateVote.ok).toBe(false)
+    if (!lateVote.ok) expect(lateVote.error).toMatch(/voting is closed/i)
+
+    // Accepted actions answer too, so the client can clear its banner.
+    expect(await alice.emitWithAck('room:reset')).toEqual({ ok: true })
+    expect(await alice.emitWithAck('vote:place', { value: '8' })).toEqual({ ok: true })
+    expect(await alice.emitWithAck('room:reveal')).toEqual({ ok: true })
+  })
+
+  it('still drops malformed action packets without a reply', async () => {
+    const alice = await connect()
+    unwrap(await alice.emitWithAck('room:create', { name: 'Alice', playerId: 'gA' }))
+    const raw = asRaw(alice)
+    raw.emit('vote:place', { value: 8 }) // non-string value: logged + dropped
+    // Same socket keeps working.
+    expect(await alice.emitWithAck('vote:place', { value: '3' })).toEqual({ ok: true })
+  })
+})
+
+describe('CORS_ORIGIN parsing', () => {
+  it('allows any origin when the variable is unset or carries no entries', () => {
+    expect(parseCorsOrigins(undefined)).toBe(true)
+    expect(parseCorsOrigins('')).toBe(true)
+    expect(parseCorsOrigins('  ,  ')).toBe(true)
+  })
+
+  it('trims entries so "https://a, https://b" actually matches', () => {
+    // Before trimming, " https://b" compared unequal to every real Origin and
+    // silently blocked that client.
+    expect(parseCorsOrigins('https://a, https://b')).toEqual(['https://a', 'https://b'])
+    expect(parseCorsOrigins(' https://a ,')).toEqual(['https://a'])
+    expect(parseCorsOrigins('https://a')).toEqual(['https://a'])
   })
 })
 

@@ -25,6 +25,7 @@ export default function App(): ReactElement {
       state={api.room}
       meId={api.meId}
       connected={api.connected}
+      error={api.error}
       onVote={api.vote}
       onReveal={api.reveal}
       onReset={api.reset}

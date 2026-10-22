@@ -52,6 +52,21 @@ function safeAck<A extends unknown[]>(ack: ((...args: A) => void) | undefined): 
 
 const isString = (value: unknown): value is string => typeof value === 'string'
 
+/**
+ * Parses `CORS_ORIGIN` (comma-separated allowlist; unset = allow any origin).
+ * Entries are trimmed so the dashboard-friendly
+ * `"https://a, https://b"` actually matches — a stray space made every origin
+ * compare unequal and silently blocked the client.
+ */
+export function parseCorsOrigins(raw: string | undefined): string[] | true {
+  if (raw === undefined) return true
+  const origins = raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+  return origins.length > 0 ? origins : true
+}
+
 /** Shape check for wire data before it reaches the pure `rooms.*` functions. */
 function isJoinPayload(candidate: unknown): candidate is JoinPayload {
   if (typeof candidate !== 'object' || candidate === null) return false
@@ -70,7 +85,7 @@ export const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<
   httpServer,
   {
     cors: {
-      origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true
+      origin: parseCorsOrigins(process.env.CORS_ORIGIN)
     }
   }
 )
@@ -178,35 +193,56 @@ io.on('connection', (socket) => {
     broadcast(result.value.code)
   })
 
-  onEvent(socket, 'vote:place', (payload) => {
+  onEvent(socket, 'vote:place', (payload, ack) => {
+    const reply = safeAck(ack)
     const { code, playerId } = socket.data
-    if (!code || !playerId) return
+    if (!code || !playerId) {
+      reply({ ok: false, error: 'You are not in a room.' })
+      return
+    }
     if (!payload || !isString(payload.value)) return
     const result = rooms.placeVote(store, code, playerId, payload.value as DeckValue)
-    if (result.ok) {
-      persist(code)
-      broadcast(code)
+    if (!result.ok) {
+      reply(result)
+      return
     }
+    persist(code)
+    reply({ ok: true })
+    broadcast(code)
   })
 
-  onEvent(socket, 'room:reveal', () => {
+  onEvent(socket, 'room:reveal', (ack) => {
+    const reply = safeAck(ack)
     const { code } = socket.data
-    if (!code) return
+    if (!code) {
+      reply({ ok: false, error: 'You are not in a room.' })
+      return
+    }
     const result = rooms.revealRoom(store, code)
-    if (result.ok) {
-      persist(code)
-      broadcast(code)
+    if (!result.ok) {
+      reply(result)
+      return
     }
+    persist(code)
+    reply({ ok: true })
+    broadcast(code)
   })
 
-  onEvent(socket, 'room:reset', () => {
+  onEvent(socket, 'room:reset', (ack) => {
+    const reply = safeAck(ack)
     const { code } = socket.data
-    if (!code) return
-    const result = rooms.resetRoom(store, code)
-    if (result.ok) {
-      persist(code)
-      broadcast(code)
+    if (!code) {
+      reply({ ok: false, error: 'You are not in a room.' })
+      return
     }
+    const result = rooms.resetRoom(store, code)
+    if (!result.ok) {
+      reply(result)
+      return
+    }
+    persist(code)
+    reply({ ok: true })
+    broadcast(code)
   })
 
   onEvent(socket, 'player:leave', (ack) => {
