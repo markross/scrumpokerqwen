@@ -1,5 +1,6 @@
 import { Redis } from '@upstash/redis'
-import type { RoomSnapshot } from './rooms.js'
+import { DECK_VALUES, type Phase } from '../shared/types.js'
+import type { PlayerSnapshot, RoomSnapshot } from './rooms.js'
 
 /**
  * Durable home for room snapshots. Implementations must never throw out of
@@ -16,6 +17,42 @@ export interface RoomRepository {
 }
 
 const ROOMS_KEY = 'scrumpoker:rooms'
+
+const PHASES: readonly string[] = ['voting', 'revealed']
+
+/**
+ * Full shape check for a persisted row, before it reaches `deserializeRoom`.
+ * `code` alone is not enough: a row that passes a shallow check but has no
+ * valid `players` array makes deserialization throw, and without this filter
+ * that one row cost us every room after it in the restore — including named
+ * rooms. Returns null for anything unusable (the caller warns and skips).
+ */
+export function parseSnapshot(candidate: unknown): RoomSnapshot | null {
+  if (!candidate || typeof candidate !== 'object') return null
+  const row = candidate as Partial<RoomSnapshot>
+  if (typeof row.code !== 'string' || row.code.length === 0) return null
+  if (row.name !== null && typeof row.name !== 'string') return null
+  if (typeof row.phase !== 'string' || !PHASES.includes(row.phase)) return null
+  if (typeof row.updatedAt !== 'number' || !Number.isFinite(row.updatedAt)) return null
+  if (!Array.isArray(row.players)) return null
+  const players: PlayerSnapshot[] = []
+  for (const entry of row.players) {
+    if (!entry || typeof entry !== 'object') return null
+    const player = entry as Partial<PlayerSnapshot>
+    if (typeof player.id !== 'string' || player.id.length === 0) return null
+    if (typeof player.name !== 'string') return null
+    const vote = player.vote
+    if (vote !== null && vote !== undefined && !(DECK_VALUES as readonly string[]).includes(vote)) return null
+    players.push({ id: player.id, name: player.name, vote: vote ?? null })
+  }
+  return {
+    code: row.code,
+    name: row.name ?? null,
+    phase: row.phase as Phase,
+    updatedAt: row.updatedAt,
+    players
+  }
+}
 
 /** Process-local repository. Useful for tests and as the no-config fallback. */
 export class MemoryRepository implements RoomRepository {
@@ -59,6 +96,7 @@ export class UpstashRepository implements RoomRepository {
   readonly mode = 'redis' as const
   private readonly pending = new Map<string, RoomSnapshot | null>()
   private timer: NodeJS.Timeout | null = null
+  private flushing: Promise<void> | null = null
 
   constructor(
     private readonly client: UpstashLike,
@@ -82,8 +120,9 @@ export class UpstashRepository implements RoomRepository {
             continue
           }
         }
-        if (candidate && typeof candidate === 'object' && typeof (candidate as RoomSnapshot).code === 'string') {
-          snapshots.push(candidate as RoomSnapshot)
+        const parsed = parseSnapshot(candidate)
+        if (parsed) {
+          snapshots.push(parsed)
         } else {
           this.log.warn('Skipping room snapshot with unexpected shape.')
         }
@@ -105,11 +144,19 @@ export class UpstashRepository implements RoomRepository {
     this.schedule()
   }
 
+  /**
+   * Shutdown path: `index.ts` calls this right before `process.exit(0)`, so it
+   * has to wait for the flush already on the wire (the in-flight promise used to
+   * be untracked, which truncated up to ~1 s of writes) and then drain whatever
+   * arrived since.
+   */
   async close(): Promise<void> {
     if (this.timer) {
       clearTimeout(this.timer)
       this.timer = null
     }
+    const inFlight = this.flushing
+    if (inFlight) await inFlight
     await this.flush()
   }
 
@@ -117,24 +164,42 @@ export class UpstashRepository implements RoomRepository {
     if (this.timer) return
     this.timer = setTimeout(() => {
       this.timer = null
+      if (this.flushing) {
+        this.schedule() // one flush at a time — re-arm and try again shortly
+        return
+      }
       void this.flush()
     }, this.coalesceMs)
     this.timer.unref()
   }
 
+  /**
+   * Drains the queue one command at a time. Single-flight by construction: two
+   * overlapping flushes could finish out of order and let a queued `hdel` land
+   * before a late `hset`, reviving a room the sweep had just deleted.
+   */
   private async flush(): Promise<void> {
+    if (this.flushing) return this.flushing
     const entries = [...this.pending]
     this.pending.clear()
-    for (const [code, snapshot] of entries) {
-      try {
-        if (snapshot) {
-          await this.client.hset(ROOMS_KEY, { [code]: JSON.stringify(snapshot) })
-        } else {
-          await this.client.hdel(ROOMS_KEY, code)
+    const running = (async () => {
+      for (const [code, snapshot] of entries) {
+        try {
+          if (snapshot) {
+            await this.client.hset(ROOMS_KEY, { [code]: JSON.stringify(snapshot) })
+          } else {
+            await this.client.hdel(ROOMS_KEY, code)
+          }
+        } catch (err) {
+          this.log.warn(`Failed to persist room "${code}".`, err)
         }
-      } catch (err) {
-        this.log.warn(`Failed to persist room "${code}".`, err)
       }
+    })()
+    this.flushing = running
+    try {
+      await running
+    } finally {
+      if (this.flushing === running) this.flushing = null
     }
   }
 }
@@ -144,6 +209,10 @@ export function createRepository(
   env: NodeJS.ProcessEnv = process.env,
   log: Logger = console
 ): RoomRepository {
+  // Tests boot `index.ts`, which builds this repository from the live env: never
+  // let a dev shell's UPSTASH_* exports turn `npm test` into writes against the
+  // production database.
+  if (env.VITEST) return new MemoryRepository()
   const url = env.UPSTASH_REDIS_REST_URL
   const token = env.UPSTASH_REDIS_REST_TOKEN
   if (url && token) {

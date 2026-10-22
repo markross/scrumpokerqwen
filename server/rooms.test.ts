@@ -392,4 +392,36 @@ describe('snapshots', () => {
     expect(store.get(live.code)!.name).toBe('team-alpha')
     expect(store.size).toBe(2)
   })
+
+  it('hydrateStore skips a malformed snapshot instead of dropping the batch', () => {
+    // loadAll validates on the way in; this is the second line of defence so a
+    // future shape regression costs one room rather than the whole restore.
+    const corrupt = {
+      code: 'BADDD',
+      name: null,
+      phase: 'voting',
+      updatedAt: 1
+    } as unknown as RoomSnapshot // players missing → deserializeRoom throws
+    const second: RoomSnapshot = {
+      code: 'CCCCC',
+      name: null,
+      phase: 'revealed',
+      updatedAt: 2,
+      players: [{ id: 'p2', name: 'Bob', vote: '13' }]
+    }
+    const first: RoomSnapshot = {
+      code: 'AAAAA',
+      name: null,
+      phase: 'voting',
+      updatedAt: 1,
+      players: [{ id: 'p1', name: 'Alice', vote: null }]
+    }
+    const store: Store = new Map()
+
+    expect(() => hydrateStore(store, [first, corrupt, second])).not.toThrow()
+
+    expect([...store.keys()]).toEqual(['AAAAA', 'CCCCC'])
+    expect(store.get('AAAAA')!.players.get('p1')!.name).toBe('Alice')
+    expect(store.get('CCCCC')!.phase).toBe('revealed')
+  })
 })
