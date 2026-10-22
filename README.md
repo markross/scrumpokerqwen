@@ -80,9 +80,13 @@ server keeps their seat (and vote) until they explicitly leave.
 | `UPSTASH_REDIS_REST_TOKEN` | unset   | (Upstash REST credentials; both must be set)        |
 
 Without the Upstash variables the server runs exactly like before: in-memory
-rooms only. With them, every room (named or not) is snapshotted to Redis,
-restored on boot, and **named rooms never expire** — a team can revisit
-"Team Alpha" any time in the future. Unnamed rooms keep the 24 h stale sweep.
+rooms only. With them, every room (named or not) is snapshotted to Redis and
+restored on boot. **A named room is a standing room**: `/<team-alpha>` keeps
+working indefinitely, but a room nobody has touched for 24 h loses the players
+who have gone — offline players are evicted, their votes with them, and an
+emptied room starts the next round clean. Players with an open tab are present,
+so they keep their seat. Unnamed rooms keep the original behaviour: deleted
+outright after 24 h idle.
 
 ## Deployment (Render)
 
