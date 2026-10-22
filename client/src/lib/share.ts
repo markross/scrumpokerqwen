@@ -1,37 +1,44 @@
-import { MAX_ROOM_NAME_LENGTH } from '@shared/naming'
+import { MAX_ROOM_NAME_LENGTH, looksLikeRoomCode, roomNameKey } from '@shared/naming'
+import type { RoomState } from '@shared/types'
 
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+/** The room the current URL path points at: by code (`/K7XQM`) or by name (`/team-alpha`). */
+export type RoomTarget = { kind: 'code'; value: string } | { kind: 'name'; value: string }
 
-export function joinCodeFromUrl(search = window.location.search): string {
-  const raw = (new URLSearchParams(search).get('join') ?? '').trim().toUpperCase()
-  if (raw.length < 3 || raw.length > 5) return ''
-  return [...raw].every((ch) => CODE_ALPHABET.includes(ch)) ? raw : ''
+/**
+ * Parse the first path segment into a room target. Code-shaped segments win
+ * (creation rules prevent room names from colliding with that shape). Null for
+ * `/` and for segments too long to be a room name.
+ */
+export function roomTargetFromPath(pathname: string): RoomTarget | null {
+  const segment = pathname.split('/').filter(Boolean)[0]
+  if (!segment) return null
+  let value: string
+  try {
+    value = decodeURIComponent(segment).trim()
+  } catch {
+    return null
+  }
+  if (value.length === 0) return null
+  if (looksLikeRoomCode(value)) return { kind: 'code', value: value.toUpperCase() }
+  if (value.length > MAX_ROOM_NAME_LENGTH) return null
+  return { kind: 'name', value }
 }
 
-export function roomNameFromUrl(search = window.location.search): string {
-  const raw = (new URLSearchParams(search).get('room') ?? '').trim()
-  return raw.length >= 1 && raw.length <= MAX_ROOM_NAME_LENGTH ? raw : ''
+/** The canonical URL path for a room: its name when it has one, else its code. */
+export function canonicalRoomPath(room: Pick<RoomState, 'code' | 'name'>): string {
+  return `/${encodeURIComponent(room.name ?? room.code)}`
 }
 
-export function shareLinkForCode(code: string, href = window.location.href): string {
-  const url = new URL(href)
-  url.search = ''
-  url.hash = ''
-  url.searchParams.set('join', code)
-  return url.toString()
+/** Full shareable URL for a room (by name or code) on the given origin. */
+export function roomUrl(nameOrCode: string, origin: string = window.location.origin): string {
+  return `${origin}/${encodeURIComponent(nameOrCode)}`
 }
 
-export function shareLinkForName(name: string, href = window.location.href): string {
-  const url = new URL(href)
-  url.search = ''
-  url.hash = ''
-  url.searchParams.set('room', name)
-  return url.toString()
-}
-
-export function clearJoinParam(): void {
-  const url = new URL(window.location.href)
-  url.searchParams.delete('join')
-  url.searchParams.delete('room')
-  window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+/** Whether a room state already satisfies a URL target (slug-insensitive). */
+export function targetMatchesRoom(
+  target: RoomTarget,
+  room: Pick<RoomState, 'code' | 'name'>
+): boolean {
+  if (target.kind === 'code') return room.code === target.value.toUpperCase()
+  return room.name !== null && roomNameKey(room.name) === roomNameKey(target.value)
 }

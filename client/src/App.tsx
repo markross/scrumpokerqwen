@@ -15,6 +15,7 @@ export default function App(): ReactElement {
         onJoinByName={api.joinByName}
         error={api.error}
         busy={api.busy}
+        target={api.lobbyTarget}
       />
     )
   }

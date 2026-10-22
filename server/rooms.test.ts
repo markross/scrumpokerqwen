@@ -260,10 +260,12 @@ describe('sweepStaleRooms', () => {
 })
 
 describe('room names', () => {
-  it('stores a normalized name, and null when omitted or blank', () => {
+  it('stores a slugified name, and null when omitted or blank', () => {
     const store: Store = new Map()
     const named = ok(createRoom(store, 'Alice', 'p1', '  Team   Alpha  '))
-    expect(named.name).toBe('Team Alpha')
+    expect(named.name).toBe('team-alpha')
+    const underscored = ok(createRoom(store, 'Dan', 'p4', 'My_Cool_Room'))
+    expect(underscored.name).toBe('my-cool-room')
     const blank = ok(createRoom(store, 'Bob', 'p2', '   '))
     expect(blank.name).toBeNull()
     const plain = ok(createRoom(store, 'Carol', 'p3'))
@@ -276,10 +278,32 @@ describe('room names', () => {
     expect(createRoom(store, 'Alice', 'p2', 'x'.repeat(41)).ok).toBe(false)
   })
 
+  it('rejects names with characters outside letters, numbers and hyphens', () => {
+    const store: Store = new Map()
+    expect(createRoom(store, 'Alice', 'p1', 'Sprint Planning 🚀').ok).toBe(false)
+    expect(createRoom(store, 'Alice', 'p2', 'team@alpha').ok).toBe(false)
+    expect(createRoom(store, 'Alice', 'p3', 'a.b.c').ok).toBe(false)
+  })
+
+  it("rejects room names shaped like room codes (3–5 code-alphabet chars)", () => {
+    const store: Store = new Map()
+    expect(createRoom(store, 'Alice', 'p1', 'beta').ok).toBe(false)
+    expect(createRoom(store, 'Alice', 'p2', 'ABCDE').ok).toBe(false)
+    // Slightly longer or hyphenated is fine — those shapes don't collide with codes.
+    expect(createRoom(store, 'Alice', 'p3', 'abcdef').ok).toBe(true)
+    expect(createRoom(store, 'Alice', 'p4', 'a-b').ok).toBe(true)
+  })
+
+  it('rejects room names that would shadow server routes', () => {
+    const store: Store = new Map()
+    expect(createRoom(store, 'Alice', 'p1', 'healthz').ok).toBe(false)
+  })
+
   it('rejects a duplicate name case- and whitespace-insensitively', () => {
     const store: Store = new Map()
     ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
     expect(createRoom(store, 'Bob', 'p2', '  team   ALPHA ').ok).toBe(false)
+    expect(createRoom(store, 'Bob', 'p3', 'team-alpha').ok).toBe(false)
   })
 
   it('allows the same name again after the room is gone', () => {
@@ -292,7 +316,7 @@ describe('room names', () => {
   it('exposes the name in the player view', () => {
     const store: Store = new Map()
     const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
-    expect(getView(room, 'p1').name).toBe('Team Alpha')
+    expect(getView(room, 'p1').name).toBe('team-alpha')
   })
 })
 
@@ -313,6 +337,20 @@ describe('joinRoomByName', () => {
     expect(joined.players.size).toBe(1)
     expect(joined.players.get('p1')!.name).toBe('Alice')
     expect(joined.players.get('p1')!.vote).toBe('8')
+  })
+
+  it('finds legacy persisted names (pre-slug rules) by their slug', () => {
+    const store: Store = new Map()
+    store.set('ABCDE', {
+      code: 'ABCDE',
+      name: 'Team Alpha',
+      phase: 'voting',
+      players: new Map(),
+      updatedAt: Date.now()
+    })
+    const joined = ok(joinRoomByName(store, 'team-alpha', 'Bob', 'p2'))
+    expect(joined.code).toBe('ABCDE')
+    expect(joined.players.get('p2')!.name).toBe('Bob')
   })
 
   it('errors on unknown or blank names and on a full room', () => {
@@ -336,7 +374,7 @@ describe('snapshots', () => {
     const snapshot = serializeRoom(store.get(room.code)!)
     const revived = deserializeRoom(JSON.parse(JSON.stringify(snapshot)) as RoomSnapshot)
     expect(revived.code).toBe(room.code)
-    expect(revived.name).toBe('Team Alpha')
+    expect(revived.name).toBe('team-alpha')
     expect(revived.phase).toBe('revealed')
     expect(revived.players.get('p1')!.vote).toBe('13')
     expect(revived.players.get('p1')!.socketId).toBeNull()
@@ -351,7 +389,7 @@ describe('snapshots', () => {
 
     hydrateStore(store, [ghost, serializeRoom({ ...snapshot, name: 'Changed' })])
     expect(store.get(other.code)!.name).toBeNull()
-    expect(store.get(live.code)!.name).toBe('Team Alpha')
+    expect(store.get(live.code)!.name).toBe('team-alpha')
     expect(store.size).toBe(2)
   })
 })

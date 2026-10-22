@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactElement } from 'react'
+import { useEffect, useState, type FormEvent, type ReactElement } from 'react'
 import { Loader2, Spade } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { ThemeToggle } from '@/components/ThemeToggle'
-import { clearJoinParam, joinCodeFromUrl, roomNameFromUrl } from '@/lib/share'
+import { type RoomTarget } from '@/lib/share'
 import { readStoredName } from '@/useRoom'
 
 interface JoinScreenProps {
@@ -16,16 +16,23 @@ interface JoinScreenProps {
   onJoinByName: (roomName: string, name: string) => void
   error: string | null
   busy: boolean
+  /** Room the URL path points at (prefills the join form). */
+  target: RoomTarget | null
 }
 
-export function JoinScreen({ onCreate, onJoin, onJoinByName, error, busy }: JoinScreenProps): ReactElement {
+export function JoinScreen({ onCreate, onJoin, onJoinByName, error, busy, target }: JoinScreenProps): ReactElement {
   const [name, setName] = useState(readStoredName)
-  const [joinMode, setJoinMode] = useState<'code' | 'name'>(() =>
-    joinCodeFromUrl() || !roomNameFromUrl() ? 'code' : 'name'
-  )
-  const [code, setCode] = useState(joinCodeFromUrl)
-  const [roomName, setRoomName] = useState(() => (joinCodeFromUrl() ? '' : roomNameFromUrl()))
+  const [joinMode, setJoinMode] = useState<'code' | 'name'>(() => (target?.kind === 'name' ? 'name' : 'code'))
+  const [code, setCode] = useState(() => (target?.kind === 'code' ? target.value : ''))
+  const [roomName, setRoomName] = useState(() => (target?.kind === 'name' ? target.value : ''))
   const [newRoomName, setNewRoomName] = useState('')
+
+  // Keep the form in sync with the address bar (back/forward while in the lobby).
+  useEffect(() => {
+    setJoinMode(target?.kind === 'name' ? 'name' : 'code')
+    setCode(target?.kind === 'code' ? target.value : '')
+    setRoomName(target?.kind === 'name' ? target.value : '')
+  }, [target?.kind, target?.value])
 
   const trimmed = name.trim()
   const canSubmit = trimmed.length > 0 && !busy
@@ -42,11 +49,9 @@ export function JoinScreen({ onCreate, onJoin, onJoinByName, error, busy }: Join
     if (!canSubmit) return
     if (joinMode === 'code') {
       if (code.trim().length < 3) return
-      clearJoinParam()
       onJoin(code.trim().toUpperCase(), trimmed)
     } else {
       if (roomName.trim().length < 1) return
-      clearJoinParam()
       onJoinByName(roomName.trim(), trimmed)
     }
   }
@@ -81,6 +86,9 @@ export function JoinScreen({ onCreate, onJoin, onJoinByName, error, busy }: Join
               maxLength={40}
               aria-label="Room name (optional)"
             />
+            <p className="text-muted-foreground text-xs">
+              Letters, numbers, spaces or hyphens — it becomes the room&apos;s web address.
+            </p>
             <Button type="submit" size="lg" disabled={!canSubmit}>
               {busy ? <Loader2 className="animate-spin" /> : null}
               Create room
