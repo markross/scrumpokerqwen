@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogTrigger
 } from '@/components/ui/dialog'
-import { shareLinkForCode, shareLinkForName } from '@/lib/share'
+import { roomUrl } from '@/lib/share'
 import { PlayerCard } from '@/components/PlayerCard'
 import { SummaryBar } from '@/components/SummaryBar'
 import { ThemeToggle } from '@/components/ThemeToggle'
@@ -45,7 +45,7 @@ export function Room({ state, meId, connected, onVote, onReveal, onReset, onLeav
   }
 
   function copyLink(): void {
-    const link = state.name ? shareLinkForName(state.name) : shareLinkForCode(state.code)
+    const link = roomUrl(state.name ?? state.code)
     void navigator.clipboard.writeText(link).then(() => {
       setCopiedLink(true)
       setTimeout(() => setCopiedLink(false), 1500)

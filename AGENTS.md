@@ -21,7 +21,7 @@ Phase 3 features are NOT agreed — confirm with the user before building them. 
 
 - `npm run dev` — tsx watch server (:3001) + Vite (:5173). Vite proxies `/socket.io` with `ws: true`, so the client is same-origin in dev.
 - `npm run lint && npm test && npm run build` — full check. There is no root typecheck script; types are checked inside `npm run build` (client = `tsc --noEmit` + vite build; server = `tsc`).
-- Single test file: `npx vitest run server/rooms.test.ts`. Vitest only includes `server/**/*.test.ts` (node env) — client tests would silently not run. E2E = `server/realtime.test.ts` (real socket.io clients vs booted server); no Playwright yet.
+- Single test file: `npx vitest run server/rooms.test.ts`. Vitest includes `server/**/*.test.ts` and `client/**/*.test.ts` (both node env — client tests must stay DOM-free: they cover pure helpers like `client/src/lib/share.ts`; anything needing the DOM would need a jsdom env first). E2E = `server/realtime.test.ts` (real socket.io clients vs booted server); no Playwright yet.
 - `npm start` runs `node server/dist/server/index.js` — note the doubled `server/` segment below.
 
 ## Build / ESM gotchas
@@ -36,6 +36,7 @@ Phase 3 features are NOT agreed — confirm with the user before building them. 
 - `server/rooms.ts` is a pure state machine over a `Store` (Map). No socket.io in it — server wiring stays in `server/index.ts`.
 - Vote secrecy: the server only ever broadcasts per-player sanitized views via `getView`; peers must not receive others' `vote` values before reveal (they see `hasVoted` only). Check this in devtools when touching any broadcast path.
 - Player identity: `playerId` lives in client `sessionStorage`; the server keeps seat + vote across refreshes, explicit Leave removes. Rooms are in-memory; the sweep deletes **unnamed** stale rooms after 24 h — **named rooms are exempt and live forever** (agreed 2026-10-19).
+- URL routing (agreed 2026-10-22): rooms live at their own path — `/<name-slug>` for named rooms, `/<CODE>` for unnamed; no query-string routing. `shared/naming.ts` is the single source of slug rules: `roomNameKey` = slug (uniqueness + join-by-name + URL identity), and creation rejects code-shaped names (3–5 code-alphabet chars) plus reserved names so a path segment resolves unambiguously (client: code-shaped segment wins). The SPA fallback in `index.ts` already serves any deep link.
 - Persistence: `server/persistence.ts` defines `RoomRepository` (memory default | Upstash Redis REST when `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` are set). `index.ts` hydrates the store before listening and queues coalesced snapshots after meaningful mutations; `rooms.ts` stays pure — serialize/hydrate helpers live there, repository wiring stays in `index.ts`. Never let a persistence error take down the server.
 - Product spec: anyone can Reveal/Reset, Reveal works with zero votes, deck is `0 1 2 3 5 8 13 21 ? ∞`, late join anytime.
 

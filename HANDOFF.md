@@ -1,7 +1,7 @@
 # Scrum Poker — Session Handoff
 
 > Read this first in a new session to pick up exactly where we left off.
-> Last updated: 2026-10-19. Repo: `/Volumes/Sensitive/scrumpokerqwen` (git `main`; remote `origin` = public `github.com/markross/scrumpokerqwen`, `main` PR-protected). Live: `https://scrumpoker-195h.onrender.com`.
+> Last updated: 2026-10-22. Repo: `/Volumes/Sensitive/scrumpokerqwen` (git `main`; remote `origin` = public `github.com/markross/scrumpokerqwen`, `main` PR-protected). Live: `https://scrumpoker-195h.onrender.com`.
 
 ## Where we are: v0.1 COMPLETE ✅ — deployed & live-verified
 
@@ -18,7 +18,8 @@ A fully working real-time planning poker app, built to an agreed spec, verified,
 - Late joining allowed anytime
 - After reveal: per-player flipped cards + summary (consensus/mode, min–max range, `?`/`∞` counted separately)
 - Create-or-join by code flow (first player creates, shares code)
-- **Room names (agreed 2026-10-19, later request — PR #9):** optional room name at creation (1–40 chars, normalized, case-insensitively unique); join by code **or** by name, plus `?room=NAME` share links; rooms are durably snapshotted so name/code/roster/current round + votes survive server restarts; **named rooms never expire** (sweep skips them); backend = `RoomRepository` (in-memory default | Upstash Redis when `UPSTASH_REDIS_REST_URL`/`_TOKEN` set)
+- **Room names (agreed 2026-10-19, later request — PR #9):** optional room name at creation (1–40 chars, case-insensitively unique); join by code **or** by name; rooms are durably snapshotted so name/code/roster/current round + votes survive server restarts; **named rooms never expire** (sweep skips them); backend = `RoomRepository` (in-memory default | Upstash Redis when `UPSTASH_REDIS_REST_URL`/`_TOKEN` set)
+- **Path-based room URLs (agreed 2026-10-22 — PR #10, supersedes the `?join=CODE`/`?room=NAME` query-string links):** every room lives at its own endpoint — `/<name-slug>` (e.g. `…/sprint-planning`) for named rooms, `/<CODE>` (e.g. `…/K7XQM`) for unnamed. The URL is the source of room intent (deep link wins over the stored session on load; back/forward re-syncs socket membership; the address bar keeps the canonical path). "Copy invite link" copies the path URL. New room names are slugified at creation and restricted to URL-safe characters (letters/numbers/hyphens; `?room=`-era free-text names are rejected at creation); code-shaped names (3–5 code-alphabet chars) and reserved names (`healthz`) are rejected so a path segment is never ambiguous — code-shaped segment wins when parsing. `roomNameKey` = slug is the single identity (uniqueness + join-by-name + URL); legacy persisted spaced names (e.g. "Team Alpha") stay joinable at their slug
 
 ### Stack (user-selected, do not silently change)
 
@@ -34,7 +35,7 @@ Node 24 LTS · Express 5 · socket.io 4 · TypeScript 5 strict (shared event con
 
 ### Verified (all green at last run)
 
-- `npm test` — 51/51 Vitest tests (`server/rooms.test.ts` 36 unit: secrecy, reveal, reset, late join, reconnect, validation, TTL sweep + room-name rules, join-by-name, named-sweep exemption, snapshot round-trip/hydration; `server/persistence.test.ts` 10: memory round-trip, repository coalescing, deletes win, close-flush, error-swallowing, loadAll parsing incl. real-client pre-parsed values + empty-hash/null + failure, env factory; `server/realtime.test.ts` 5 two-client socket.io e2e: wire-level secrecy, reveal/reset, disconnect/reconnect, leave, bad joins + named-room create/join-by-name/secrecy and duplicate-name ack errors)
+- `npm test` — 67/67 Vitest tests (`server/rooms.test.ts` 40 unit: secrecy, reveal, reset, late join, reconnect, validation, TTL sweep + room-name slug rules incl. code-shape/reserved/char-set rejection and legacy-name lookup, join-by-name, named-sweep exemption, snapshot round-trip/hydration; `server/persistence.test.ts` 10: memory round-trip, repository coalescing, deletes win, close-flush, error-swallowing, loadAll parsing incl. real-client pre-parsed values + empty-hash/null + failure, env factory; `server/realtime.test.ts` 5 two-client socket.io e2e: wire-level secrecy, reveal/reset, disconnect/reconnect, leave, bad joins + named-room create/join-by-name/secrecy and duplicate-name ack errors; `client/src/lib/share.test.ts` 12: path parsing (code-over-name precedence, percent-decoding, malformed/over-long segments), canonical paths, share URLs, target-matching)
 - `npm run lint` — clean; `npm run build` — clean
 - The throwaway two-client realtime script is now permanent: `server/realtime.test.ts` (runs in `npm test`)
 - Prod server serves built client + SPA routes + healthz
@@ -78,10 +79,11 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 | `7ff0140` | feat(client): light/dark theme toggle — PR #7 |
 | `4edab81` | docs: record Phase 3 agreed slice shipped (share links + theme toggle) — PR #8 |
 | `60ccb0c` | feat(rooms): optional room names, join by name + `?room=` links, durable rooms via RoomRepository — PR #9 |
+| `2b068f4` | feat(routing): path-based rooms — `/<name-slug>` + `/<CODE>` endpoints, slugified names, query-string links dropped — PR #10 |
 
 ## Next steps
 
-Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user decision — see below). **Phase 3 (agreed slice) SHIPPED ✅ 2026-10-19**: share links (PR #6) + light/dark theme toggle (PR #7) merged to `main`, CI green, and **live-verified on Render** (no-FOUC theme script + `"join"`/`Copy invite link` strings present in the served bundle). **Room names + durability (PR #9) agreed & opened 2026-10-19** (user request: *"custom room name … will persist permanently so that room can be revisited at any time in the future"*; spec Q&A answered: optional name, name search + `?room=` link, everything survives restarts forever, Upstash free tier backend) — **merge + deploy + enable Upstash env still pending** (see "To enable durability in prod" below). Scale answer stands for traffic (a handful of small rooms); the earlier "in-memory stays" persistence deferral is **superseded by PR #9** for durability, but multi-instance stays out of scope. **Next actionable work: review/merge #8 + #9, enable Upstash in Render, then confirm with the user** any further backlog item (story text ruled out; remaining unagreed options: spectator/facilitator roles, sound on reveal, CSV export, Playwright UI tests) — do not build unagreed features.
+Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user decision — see below). **Phase 3 (agreed slice) SHIPPED ✅ 2026-10-19**: share links (PR #6) + light/dark theme toggle (PR #7) merged to `main`, CI green, and **live-verified on Render** (no-FOUC theme script + `"join"`/`Copy invite link` strings present in the served bundle). **Room names + durability (PR #9) agreed 2026-10-19, MERGED 2026-10-19** (user request: *"custom room name … will persist permanently so that room can be revisited at any time in the future"*; spec Q&A answered: optional name, name search + share link, everything survives restarts forever, Upstash free tier backend) — **Upstash env enablement in Render still pending** (see "To enable durability in prod" below). **Path-based room URLs (PR #10) agreed & opened 2026-10-22** (user request: *"updating the routing to not be query string based, so we can have rooms at their own endpoint e.g. /some-room"*; decisions: slugify + restrict new names, drop old `?join=`/`?room=` links, hand-rolled routing — no router dep, `/<CODE>` for unnamed rooms; +17 tests incl. the first client unit suite). Scale answer stands for traffic (a handful of small rooms); the earlier "in-memory stays" persistence deferral is **superseded by PR #9** for durability, but multi-instance stays out of scope. **Next actionable work: enable Upstash in Render, review/merge #10, then confirm with the user** any further backlog item (story text ruled out; remaining unagreed options: spectator/facilitator roles, sound on reveal, CSV export, Playwright UI tests) — do not build unagreed features.
 
 ### Phase 1 — Ship it ✅ COMPLETE
 
@@ -102,10 +104,11 @@ Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user 
 
 - **Story text per round**: a "current story" field (someone types the story being estimated; shown above the grid) and a lightweight backlog/next-story flow — the natural evolution of "Reset = new round".
 - **Persistence / multi-instance**: ✅ **Persistence shipped via PR #9** (agreed 2026-10-19 as part of room names): `RoomRepository` seam (memory | Upstash Redis REST) + snapshot/hydrate — full room state survives restarts. **Multi-instance remains deferred** (scale = a handful of small rooms, single instance).
-- ✅ **Share links** (`?join=CODE` prefill so the creator can send one clickable link) — **agreed + shipped 2026-10-19**, merged PR #6 (client-only: `client/src/lib/share.ts`, JoinScreen prefill, Room "Copy invite link"; live-verified on Render).
+- ✅ **Share links** (`?join=CODE` prefill so the creator can send one clickable link) — **agreed + shipped 2026-10-19**, merged PR #6 (client-only: `client/src/lib/share.ts`, JoinScreen prefill, Room "Copy invite link"; live-verified on Render). **Superseded 2026-10-22 by path-based URLs (PR #10) below.**
 - **Spectator/facilitator roles**: only agreed "anyone can control" for now; if a facilitator model is ever wanted, gate reveal/reset server-side.
 - ✅ **Light/dark theme toggle** — **agreed + shipped 2026-10-19**, merged PR #7 (client-only: `ThemeToggle` + `lib/theme.ts`; localStorage `scrumpoker.theme`, system default, no-FOUC script in `index.html`; live-verified on Render).
 - ✅ **Room names + durable rooms** — **agreed 2026-10-19 (user request)**, PR #9 (stacked on #8): optional name at create, join by code/name, `?room=NAME` links, `RoomRepository` (memory | Upstash), named rooms sweep-exempt; `shared/naming.ts` rules; 22 new tests.
+- ✅ **Path-based room URLs** — **agreed 2026-10-22 (user request)**, PR #10: `/<name-slug>` + `/<CODE>` endpoints replace the query-string links (dropped, no redirect — user decision); creation-time slug rules + reserved/code-shape guards in `shared/naming.ts` (`roomNameKey` = slug), client path routing in `useRoom`/`lib/share.ts` (deep link, popstate re-sync, canonical address bar); +17 tests (5 server, 12 client — first client unit suite; vitest now also includes `client/**/*.test.ts`).
 - Sound on reveal; export results CSV. (not agreed)
 
 #### To enable durability in prod (after #9 merges)

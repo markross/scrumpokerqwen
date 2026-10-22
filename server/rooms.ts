@@ -6,9 +6,8 @@ import {
   type PlayerView,
   type RoomState
 } from '../shared/types.js'
-import { normalizeRoomName, roomNameKey, validRoomName } from '../shared/naming.js'
+import { CODE_ALPHABET, roomNameKey, slugifyRoomName, validateNewRoomName } from '../shared/naming.js'
 
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const CODE_LENGTH = 5
 export const MAX_PLAYERS = 30
 export const MAX_NAME_LENGTH = 24
@@ -84,10 +83,11 @@ export function createRoom(
 ): Result<Room> {
   if (!validName(name)) return fail('Please enter a name (1–24 characters).')
   let room: string | null = null
-  if (roomName !== undefined && normalizeRoomName(roomName).length > 0) {
-    if (!validRoomName(roomName)) return fail('Please enter a room name (1–40 characters).')
-    room = normalizeRoomName(roomName)
-    const taken = [...store.values()].some((other) => other.name !== null && roomNameKey(other.name) === roomNameKey(room!))
+  if (roomName !== undefined && roomName.trim().length > 0) {
+    const nameError = validateNewRoomName(roomName)
+    if (nameError) return fail(nameError)
+    room = slugifyRoomName(roomName)
+    const taken = [...store.values()].some((other) => other.name !== null && roomNameKey(other.name) === room!)
     if (taken) return fail(`A room named "${room}" already exists. Pick a different name.`)
   }
   const code = generateCode(store)
@@ -134,9 +134,9 @@ export function joinRoomByName(
   name: string,
   playerId: string
 ): Result<Room> {
-  const wanted = normalizeRoomName(rawRoomName)
+  const wanted = slugifyRoomName(rawRoomName)
   if (wanted.length === 0) return fail('Enter a room name to join.')
-  const key = roomNameKey(wanted)
+  const key = wanted
   const room = [...store.values()].find((other) => other.name !== null && roomNameKey(other.name) === key)
   if (!room) return fail(`A room named "${wanted}" was not found. Check the name or create a new room.`)
   return joinExisting(room, name, playerId)

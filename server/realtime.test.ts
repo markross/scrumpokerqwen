@@ -191,7 +191,7 @@ describe('named rooms (two socket.io clients)', () => {
       roomName: '  Team   Retro  '
     })
     const code = unwrap(created)
-    const firstState = await aliceRec.until((s) => s.name === 'Team Retro')
+    const firstState = await aliceRec.until((s) => s.name === 'team-retro')
     expect(firstState.code).toBe(code)
 
     const bob = await connect()
