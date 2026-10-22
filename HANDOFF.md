@@ -32,10 +32,11 @@ Node 24 LTS · Express 5 · socket.io 4 · TypeScript 5 strict (shared event con
 3. **Stable player identity:** `playerId` in `sessionStorage`; server keeps seat + vote across refreshes; explicit Leave removes; disconnected players stay listed as Offline. **Unnamed** stale rooms swept after 24 h TTL; **named rooms are exempt (live forever, agreed 2026-10-19)**.
 4. Rooms live in-memory behind a `RoomRepository` persistence seam (`server/persistence.ts`: memory | Upstash Redis REST). `index.ts` hydrates before listen, queues coalesced snapshots after mutations, flushes on SIGTERM; persistence errors are logged, never fatal; `rooms.ts` stays pure/socket.io-free.
 5. Server hosts the built client + SPA fallback + `/healthz` (`server/index.ts`); dev = `tsx watch` (3001) + Vite (5173, proxies `/socket.io`, ws:true).
+6. **Socket handler hardening (2026-10-22, PR #11):** every client event handler in `index.ts` is registered through the `onEvent` wrapper (try/catch + `console.warn`) — socket.io dispatches listeners in `process.nextTick` with no try/catch, so an unguarded throw from one malformed packet would kill the whole process. Payloads are shape-checked at handler entry before touching `rooms.*`, and every ack goes through `safeAck` (missing callback = no-op). Malformed packets are logged + dropped, never fatal — same principle as persistence errors. Covered by `realtime.test.ts`.
 
 ### Verified (all green at last run)
 
-- `npm test` — 67/67 Vitest tests (`server/rooms.test.ts` 40 unit: secrecy, reveal, reset, late join, reconnect, validation, TTL sweep + room-name slug rules incl. code-shape/reserved/char-set rejection and legacy-name lookup, join-by-name, named-sweep exemption, snapshot round-trip/hydration; `server/persistence.test.ts` 10: memory round-trip, repository coalescing, deletes win, close-flush, error-swallowing, loadAll parsing incl. real-client pre-parsed values + empty-hash/null + failure, env factory; `server/realtime.test.ts` 5 two-client socket.io e2e: wire-level secrecy, reveal/reset, disconnect/reconnect, leave, bad joins + named-room create/join-by-name/secrecy and duplicate-name ack errors; `client/src/lib/share.test.ts` 12: path parsing (code-over-name precedence, percent-decoding, malformed/over-long segments), canonical paths, share URLs, target-matching)
+- `npm test` — 69/69 Vitest tests (`server/rooms.test.ts` 40 unit: secrecy, reveal, reset, late join, reconnect, validation, TTL sweep + room-name slug rules incl. code-shape/reserved/char-set rejection and legacy-name lookup, join-by-name, named-sweep exemption, snapshot round-trip/hydration; `server/persistence.test.ts` 10: memory round-trip, repository coalescing, deletes win, close-flush, error-swallowing, loadAll parsing incl. real-client pre-parsed values + empty-hash/null + failure, env factory; `server/realtime.test.ts` 7 two-client socket.io e2e: wire-level secrecy, reveal/reset, disconnect/reconnect, leave, bad joins + named-room create/join-by-name/secrecy and duplicate-name ack errors, + malformed-packet hardening (no-ack emits, non-string payloads — server survives, replies with error acks, keeps serving); `client/src/lib/share.test.ts` 12: path parsing (code-over-name precedence, percent-decoding, malformed/over-long segments), canonical paths, share URLs, target-matching)
 - `npm run lint` — clean; `npm run build` — clean
 - The throwaway two-client realtime script is now permanent: `server/realtime.test.ts` (runs in `npm test`)
 - Prod server serves built client + SPA routes + healthz
@@ -80,6 +81,7 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 | `4edab81` | docs: record Phase 3 agreed slice shipped (share links + theme toggle) — PR #8 |
 | `60ccb0c` | feat(rooms): optional room names, join by name + `?room=` links, durable rooms via RoomRepository — PR #9 |
 | `2b068f4` | feat(routing): path-based rooms — `/<name-slug>` + `/<CODE>` endpoints, slugified names, query-string links dropped — PR #10 |
+| `5508546` | fix(server): socket handler hardening — no single malformed packet can crash the server — PR #11 |
 
 ## Next steps
 

@@ -6,6 +6,7 @@ import { Server, type Socket } from 'socket.io'
 import type {
   ClientToServerEvents,
   DeckValue,
+  JoinPayload,
   ServerToClientEvents
 } from '../shared/types.js'
 import * as rooms from './rooms.js'
@@ -17,6 +18,51 @@ interface SocketData {
 }
 
 type RoomSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>
+
+/**
+ * socket.io dispatches event listeners via `emitUntyped` inside
+ * `process.nextTick` with no try/catch, so a synchronous throw in a handler
+ * (e.g. from a malformed packet) becomes an uncaughtException that kills the
+ * whole process. Register every socket handler through this wrapper: a bad
+ * packet is logged and dropped, never fatal (same principle as the
+ * persistence-error invariant).
+ */
+function onEvent<S extends keyof ClientToServerEvents>(
+  socket: RoomSocket,
+  event: S,
+  handler: (...args: Parameters<ClientToServerEvents[S]>) => void
+): void {
+  const listener = (...args: unknown[]): void => {
+    try {
+      handler(...(args as Parameters<ClientToServerEvents[S]>))
+    } catch (err) {
+      console.warn(`Dropped malformed "${String(event)}" packet from socket ${socket.id}.`, err)
+    }
+  }
+  // socket.io's overloaded `on` cannot infer its listener type through a
+  // generic event key; the wrapper's signature is exactly what the matching
+  // overload expects, so cast the method at this single boundary.
+  ;(socket.on as unknown as (ev: S, listener: (...args: unknown[]) => void) => unknown)(event, listener)
+}
+
+/** Never assume the client supplied the ack callback; a missing one is a no-op. */
+function safeAck<A extends unknown[]>(ack: ((...args: A) => void) | undefined): (...args: A) => void {
+  return typeof ack === 'function' ? ack : () => {}
+}
+
+const isString = (value: unknown): value is string => typeof value === 'string'
+
+/** Shape check for wire data before it reaches the pure `rooms.*` functions. */
+function isJoinPayload(candidate: unknown): candidate is JoinPayload {
+  if (typeof candidate !== 'object' || candidate === null) return false
+  const payload = candidate as Partial<JoinPayload>
+  return (
+    isString(payload.name) &&
+    isString(payload.playerId) &&
+    (payload.code === undefined || isString(payload.code)) &&
+    (payload.roomName === undefined || isString(payload.roomName))
+  )
+}
 
 const app = express()
 export const httpServer = createServer(app)
@@ -81,47 +127,58 @@ app.use((req, res, next) => {
 })
 
 io.on('connection', (socket) => {
-  socket.on('room:create', (payload, ack) => {
+  onEvent(socket, 'room:create', (payload, ack) => {
+    const reply = safeAck(ack)
     if (socket.data.code) {
-      ack({ ok: false, error: 'You are already in a room. Leave it first.' })
+      reply({ ok: false, error: 'You are already in a room. Leave it first.' })
+      return
+    }
+    if (!isJoinPayload(payload)) {
+      reply({ ok: false, error: 'Malformed request.' })
       return
     }
     const result = rooms.createRoom(store, payload.name, payload.playerId, payload.roomName)
     if (!result.ok) {
-      ack(result)
+      reply(result)
       return
     }
     attach(socket, result.value.code, payload.playerId)
     persist(result.value.code)
-    ack({ ok: true, code: result.value.code })
+    reply({ ok: true, code: result.value.code })
     broadcast(result.value.code)
   })
 
-  socket.on('room:join', (payload, ack) => {
+  onEvent(socket, 'room:join', (payload, ack) => {
+    const reply = safeAck(ack)
     if (socket.data.code) {
-      ack({ ok: false, error: 'You are already in a room. Leave it first.' })
+      reply({ ok: false, error: 'You are already in a room. Leave it first.' })
+      return
+    }
+    if (!isJoinPayload(payload)) {
+      reply({ ok: false, error: 'Malformed request.' })
       return
     }
     if (!payload.code && !payload.roomName) {
-      ack({ ok: false, error: 'Enter a room code or room name to join.' })
+      reply({ ok: false, error: 'Enter a room code or room name to join.' })
       return
     }
     const result = payload.code
       ? rooms.joinRoom(store, payload.code, payload.name, payload.playerId)
       : rooms.joinRoomByName(store, payload.roomName!, payload.name, payload.playerId)
     if (!result.ok) {
-      ack(result)
+      reply(result)
       return
     }
     attach(socket, result.value.code, payload.playerId)
     persist(result.value.code)
-    ack({ ok: true, code: result.value.code })
+    reply({ ok: true, code: result.value.code })
     broadcast(result.value.code)
   })
 
-  socket.on('vote:place', (payload) => {
+  onEvent(socket, 'vote:place', (payload) => {
     const { code, playerId } = socket.data
     if (!code || !playerId) return
+    if (!payload || !isString(payload.value)) return
     const result = rooms.placeVote(store, code, playerId, payload.value as DeckValue)
     if (result.ok) {
       persist(code)
@@ -129,7 +186,7 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on('room:reveal', () => {
+  onEvent(socket, 'room:reveal', () => {
     const { code } = socket.data
     if (!code) return
     const result = rooms.revealRoom(store, code)
@@ -139,7 +196,7 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on('room:reset', () => {
+  onEvent(socket, 'room:reset', () => {
     const { code } = socket.data
     if (!code) return
     const result = rooms.resetRoom(store, code)
@@ -149,7 +206,8 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on('player:leave', (ack) => {
+  onEvent(socket, 'player:leave', (ack) => {
+    const reply = safeAck(ack)
     const { code, playerId } = socket.data
     if (code && playerId) {
       rooms.removePlayer(store, code, playerId)
@@ -157,9 +215,10 @@ io.on('connection', (socket) => {
       persist(code)
       broadcast(code)
     }
-    ack({ ok: true })
+    reply({ ok: true })
   })
 
+  // Reads no wire data (only server-set socket.data), so it needs no wrapper.
   socket.on('disconnect', () => {
     const { code } = socket.data
     detach(socket)
