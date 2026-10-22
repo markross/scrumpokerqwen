@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createRepository,
   MemoryRepository,
+  parseSnapshot,
   UpstashRepository,
   type UpstashLike
 } from './persistence.js'
@@ -69,6 +70,61 @@ describe('UpstashRepository', () => {
     expect(client.hset).toHaveBeenCalledTimes(1)
   })
 
+  it('close() waits for a flush already on the wire before resolving', async () => {
+    // index.ts exits right after close(): an untracked in-flight hset used to be
+    // truncated by process.exit(0), losing up to a second of writes per redeploy.
+    const client = fakeClient()
+    let release!: () => void
+    client.hset.mockImplementation(
+      () => new Promise<number>((resolve) => (release = () => resolve(1)))
+    )
+    const repo = new UpstashRepository(client, 5, { warn: () => {} })
+    repo.save(snapshot('AAAAA'))
+    await sleep(25) // the coalesce timer has fired; the hset is in flight now
+    expect(client.hset).toHaveBeenCalledTimes(1)
+
+    let closed = false
+    const closing = repo.close().then(() => {
+      closed = true
+    })
+    await sleep(25)
+    expect(closed).toBe(false)
+
+    release()
+    await closing
+    expect(closed).toBe(true)
+    expect(client.hset).toHaveBeenCalledTimes(1) // not re-issued for the same snapshot
+  })
+
+  it('never runs two flushes at once, so queued commands keep their order', async () => {
+    // Overlapping flushes could finish out of order and land an hdel before a
+    // late hset, reviving a room the sweep had just deleted.
+    const client = fakeClient()
+    let inFlight = 0
+    let overlapped = false
+    client.hset.mockImplementation(
+      () =>
+        new Promise<number>((resolve) => {
+          inFlight++
+          if (inFlight > 1) overlapped = true
+          setTimeout(() => {
+            inFlight--
+            resolve(1)
+          }, 20)
+        })
+    )
+    const repo = new UpstashRepository(client, 5, { warn: () => {} })
+    repo.save(snapshot('AAAAA'))
+    await sleep(8) // first flush is on the wire
+    repo.save(snapshot('BBBBB')) // its flush has to wait for the running one
+    await repo.close()
+
+    expect(overlapped).toBe(false)
+    expect(
+      client.hset.mock.calls.map(([, kv]) => Object.keys(kv as Record<string, string>))
+    ).toEqual([['AAAAA'], ['BBBBB']])
+  })
+
   it('swallows client errors and keeps the server running', async () => {
     const client = fakeClient()
     client.hset.mockRejectedValue(new Error('redis down'))
@@ -111,6 +167,75 @@ describe('UpstashRepository', () => {
     client.hgetall.mockResolvedValue(null)
     const repo = new UpstashRepository(client, 5, { warn: () => {} })
     expect(await repo.loadAll()).toEqual([])
+  })
+
+  it('loadAll skips corrupt rows instead of aborting the whole restore', async () => {
+    // The bug this pins down: a row that passed the shallow `code` check but had
+    // no valid players array threw inside deserializeRoom during hydration, and
+    // the catch-all in index.ts dropped every room after it — named rooms
+    // included.
+    const good = {
+      code: 'AAAAA',
+      name: 'Team Alpha',
+      phase: 'revealed',
+      updatedAt: 7,
+      players: [{ id: 'p1', name: 'Alice', vote: '8' }]
+    }
+    const corrupt: Record<string, unknown> = {
+      BB: { code: 'BB', name: null, phase: 'voting', updatedAt: 1 }, // players missing
+      CC: { code: 'CC', name: null, phase: 'voting', updatedAt: 1, players: 'nope' },
+      DD: { code: 'DD', name: null, phase: 'done', updatedAt: 1, players: [] }, // bad phase
+      EE: { code: 'EE', name: null, phase: 'voting', updatedAt: 'yesterday', players: [] },
+      FF: {
+        code: 'FF',
+        name: null,
+        phase: 'voting',
+        updatedAt: 1,
+        players: [{ id: 'p1', name: 'Alice', vote: '77' }] // off the deck
+      },
+      GG: { code: 'GG', name: null, phase: 'voting', updatedAt: 1, players: [null] }
+    }
+    const client = fakeClient()
+    client.hgetall.mockResolvedValue({ ...corrupt, AAAAA: good })
+    const warn = vi.fn()
+    const repo = new UpstashRepository(client, 5, { warn })
+
+    expect(await repo.loadAll()).toEqual([good])
+    expect(warn).toHaveBeenCalledTimes(6)
+  })
+})
+
+describe('parseSnapshot', () => {
+  const valid = {
+    code: 'AAAAA',
+    name: 'Team Alpha',
+    phase: 'voting',
+    updatedAt: 1,
+    players: [{ id: 'p1', name: 'Alice', vote: null }]
+  }
+
+  it('accepts a well-formed snapshot and normalizes a missing vote to null', () => {
+    expect(parseSnapshot(valid)).toEqual(valid)
+    const noVote = { ...valid, players: [{ id: 'p1', name: 'Alice' }] }
+    expect(parseSnapshot(noVote)?.players).toEqual([{ id: 'p1', name: 'Alice', vote: null }])
+    expect(parseSnapshot({ ...valid, players: [{ id: 'p1', name: 'Alice', vote: '∞' }] })?.players[0]?.vote).toBe('∞')
+  })
+
+  it('rejects rows that would make deserialization throw', () => {
+    expect(parseSnapshot(null)).toBeNull()
+    expect(parseSnapshot('AAAAA')).toBeNull()
+    expect(parseSnapshot({ ...valid, code: '' })).toBeNull()
+    expect(parseSnapshot({ ...valid, name: 7 })).toBeNull()
+    expect(parseSnapshot({ ...valid, phase: 'done' })).toBeNull()
+    expect(parseSnapshot({ ...valid, updatedAt: '1' })).toBeNull()
+    expect(parseSnapshot({ ...valid, updatedAt: NaN })).toBeNull()
+    expect(parseSnapshot({ ...valid, players: undefined })).toBeNull()
+    expect(parseSnapshot({ ...valid, players: 'p1' })).toBeNull()
+    expect(parseSnapshot({ ...valid, players: [null] })).toBeNull()
+    expect(parseSnapshot({ ...valid, players: [{ name: 'Alice', vote: null }] })).toBeNull()
+    expect(parseSnapshot({ ...valid, players: [{ id: '', name: 'Alice', vote: null }] })).toBeNull()
+    expect(parseSnapshot({ ...valid, players: [{ id: 'p1', vote: null }] })).toBeNull()
+    expect(parseSnapshot({ ...valid, players: [{ id: 'p1', name: 'Alice', vote: '77' }] })).toBeNull()
   })
 })
 

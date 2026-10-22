@@ -282,6 +282,13 @@ export function deserializeRoom(snapshot: RoomSnapshot): Room {
 export function hydrateStore(store: Store, snapshots: RoomSnapshot[]): void {
   for (const snapshot of snapshots) {
     if (store.has(snapshot.code)) continue
-    store.set(snapshot.code, deserializeRoom(snapshot))
+    try {
+      store.set(snapshot.code, deserializeRoom(snapshot))
+    } catch {
+      // Defense in depth behind `loadAll`'s validation: one malformed row must
+      // not cost us the rest of the batch (named rooms in the same restore are
+      // meant to survive). Skipped silently — this module stays pure and
+      // log-free; warning belongs to the repository that read the row.
+    }
   }
 }
