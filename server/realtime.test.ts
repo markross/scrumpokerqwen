@@ -33,6 +33,28 @@ function connect(): Promise<ClientSocket> {
   })
 }
 
+/** Drops the transport and waits for socket.io to bring it back up. */
+function reconnect(socket: ClientSocket): Promise<void> {
+  socket.disconnect()
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      socket.off('connect', onConnect)
+      socket.off('connect_error', onError)
+    }
+    const onConnect = (): void => {
+      cleanup()
+      resolve()
+    }
+    const onError = (err: Error): void => {
+      cleanup()
+      reject(err)
+    }
+    socket.on('connect', onConnect)
+    socket.on('connect_error', onError)
+    socket.connect()
+  })
+}
+
 interface Recorder {
   states: RoomState[]
   until(predicate: (state: RoomState) => boolean, from?: number): Promise<RoomState>
@@ -241,6 +263,75 @@ describe('named rooms (two socket.io clients)', () => {
     })
     expect(unknown.ok).toBe(false)
     if (!unknown.ok) expect(unknown.error).toMatch(/not found/i)
+  })
+})
+
+describe('rejoin after reconnect (two socket.io clients)', () => {
+  // socket.io restores the transport on its own but not the room membership, so
+  // the client re-issues its join on 'connect' (useRoom's rejoin). Without that,
+  // a Render spin-down/redeploy left every player showing Offline with dead
+  // controls until a manual reload.
+  it('restores the seat, the vote and the controls when the transport comes back', async () => {
+    const alice = await connect()
+    const aliceRec = record(alice)
+    const code = unwrap(await alice.emitWithAck('room:create', { name: 'Alice', playerId: 'rA' }))
+    await aliceRec.until((s) => s.players.length === 1)
+
+    const bob = await connect()
+    unwrap(await bob.emitWithAck('room:join', { name: 'Bob', playerId: 'rB', code }))
+    await aliceRec.until(twoPlayers)
+    bob.emit('vote:place', { value: '8' })
+    await aliceRec.until((s) => byId(s, 'rB')?.hasVoted === true)
+
+    bob.on('connect', () => {
+      // What useRoom's connect handler does for the room it intends to be in.
+      bob.emit('room:join', { code, name: 'Bob', playerId: 'rB' }, () => {})
+    })
+    const bobRec = record(bob)
+    const seenByAlice = aliceRec.states.length
+    await reconnect(bob)
+
+    // Same seat, kept name, kept vote — no reload needed.
+    const restored = await bobRec.until((s) => byId(s, 'rB')?.vote === '8')
+    expect(restored.code).toBe(code)
+    expect(byId(restored, 'rA')?.name).toBe('Alice')
+    await aliceRec.until((s) => byId(s, 'rB')?.connected === true, seenByAlice)
+
+    // Re-attached means in control again (socket.data rebound).
+    bob.emit('room:reveal')
+    const revealed = await aliceRec.until((s) => s.phase === 'revealed', seenByAlice)
+    expect(byId(revealed, 'rB')?.vote).toBe('8')
+  })
+
+  it('treats a repeated join for the same room as a no-op success', async () => {
+    const host = await connect()
+    const code = unwrap(await host.emitWithAck('room:create', { name: 'Host', playerId: 'jA' }))
+    const elsewhere = await connect()
+    const otherCode = unwrap(
+      await elsewhere.emitWithAck('room:create', { name: 'Elsewhere', playerId: 'jX' })
+    )
+
+    const bob = await connect()
+    const bobRec = record(bob)
+    unwrap(await bob.emitWithAck('room:join', { name: 'Bob', playerId: 'jB', code }))
+
+    // A join replayed by the send buffer can land on a socket the server still
+    // considers attached; it must not come back as a rejected double join.
+    expect(unwrap(await bob.emitWithAck('room:join', { name: 'Bob', playerId: 'jB', code }))).toBe(code)
+
+    // Switching rooms without leaving is still refused, for another room and for
+    // another player in this one.
+    const switchRooms = await bob.emitWithAck('room:join', { name: 'Bob', playerId: 'jB', code: otherCode })
+    expect(switchRooms.ok).toBe(false)
+    if (!switchRooms.ok) expect(switchRooms.error).toMatch(/already in a room/i)
+    const hopSeat = await bob.emitWithAck('room:join', { name: 'Bob', playerId: 'jB2', code })
+    expect(hopSeat.ok).toBe(false)
+    if (!hopSeat.ok) expect(hopSeat.error).toMatch(/already in a room/i)
+
+    // Still bound to the first room, and still in control.
+    bob.emit('room:reveal')
+    const revealed = await bobRec.until((s) => s.phase === 'revealed')
+    expect(revealed.code).toBe(code)
   })
 })
 

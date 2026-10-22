@@ -14,14 +14,9 @@ import {
   targetMatchesRoom,
   type RoomTarget
 } from '@/lib/share'
+import { joinPayload, rejoinAction, shouldAcceptState, type JoinIntent } from '@/lib/session'
 
 type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>
-
-interface StoredSession {
-  code: string
-  name: string
-  playerId: string
-}
 
 const SESSION_KEY = 'scrumpoker.session'
 const PLAYER_KEY = 'scrumpoker.playerId'
@@ -36,11 +31,11 @@ function getPlayerId(): string {
   return id
 }
 
-function loadSession(): StoredSession | null {
+function loadSession(): JoinIntent | null {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as StoredSession
+    const parsed = JSON.parse(raw) as JoinIntent
     if (typeof parsed.code === 'string' && typeof parsed.playerId === 'string') return parsed
     return null
   } catch {
@@ -48,9 +43,9 @@ function loadSession(): StoredSession | null {
   }
 }
 
-function saveSession(session: StoredSession): void {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
-  sessionStorage.setItem(NAME_KEY, session.name)
+function saveSession(intent: JoinIntent): void {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(intent))
+  sessionStorage.setItem(NAME_KEY, intent.name)
 }
 
 function clearSession(): void {
@@ -100,6 +95,36 @@ export function useRoom(): RoomApi {
     setRoom(state)
   }, [])
 
+  /** The room our socket should be bound to (drives rejoin + `room:state` gating). */
+  const intentRef = useRef<JoinIntent | null>(null)
+  /** True once the current physical connection has been bound by a create/join ack. */
+  const boundRef = useRef(false)
+  /** True while a create/join emit is waiting for its ack. */
+  const awaitingAckRef = useRef(false)
+  /** Invalidates acks of superseded/abandoned emits (Leave, disconnect, newer op). */
+  const opRef = useRef(0)
+
+  const beginOp = useCallback((): number => {
+    awaitingAckRef.current = true
+    return ++opRef.current
+  }, [])
+
+  const endOp = useCallback((op: number): void => {
+    if (op === opRef.current) awaitingAckRef.current = false
+  }, [])
+
+  const bindIntent = useCallback((intent: JoinIntent): void => {
+    intentRef.current = intent
+    boundRef.current = true
+    saveSession(intent)
+  }, [])
+
+  const clearIntent = useCallback((): void => {
+    intentRef.current = null
+    boundRef.current = false
+    clearSession()
+  }, [])
+
   const pushRoomPath = useCallback((path: string) => {
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
@@ -107,23 +132,25 @@ export function useRoom(): RoomApi {
     }
   }, [])
 
-  /** Join the room a URL target names; the stored display name is reused on back/forward. */
-  const joinTarget = useCallback(
-    (target: RoomTarget, displayName: string, pushUrl: boolean) => {
+  /**
+   * The single join path: emit `room:join`, then share the success bookkeeping
+   * (session + intent + canonical URL). Used by the code join, the name join,
+   * the deep-link/back-forward join, and the stored-session resume.
+   */
+  const doJoin = useCallback(
+    (target: RoomTarget, displayName: string, opts: { pushUrl: boolean }) => {
       setError(null)
       setBusy(true)
-      const payload =
-        target.kind === 'code'
-          ? { code: target.value, name: displayName, playerId: meId }
-          : { roomName: target.value, name: displayName, playerId: meId }
-      socket.emit('room:join', payload, (result) => {
+      const op = beginOp()
+      socket.emit('room:join', joinPayload(target, displayName, meId), (result) => {
+        endOp(op)
         if (!result.ok) {
           setBusy(false)
           setError(result.error)
           return
         }
-        saveSession({ code: result.code, name: displayName, playerId: meId })
-        if (pushUrl) {
+        bindIntent({ code: result.code, name: displayName, playerId: meId })
+        if (opts.pushUrl) {
           pushRoomPath(
             canonicalRoomPath({
               code: result.code,
@@ -133,22 +160,33 @@ export function useRoom(): RoomApi {
         }
       })
     },
-    [socket, meId, pushRoomPath]
+    [socket, meId, pushRoomPath, beginOp, endOp, bindIntent]
   )
 
+  /**
+   * Leave for good. Clears synchronously — offline, socket.io buffers the emit
+   * and the ack may never arrive, so gating the clear on it would leave the
+   * button dead and (worse) a reload would rejoin the room we just left.
+   */
   const leaveRoom = useCallback(() => {
-    socket.emit('player:leave', () => {
-      clearSession()
-      setRoomBoth(null)
-      setError(null)
-    })
-  }, [socket, setRoomBoth])
+    opRef.current++
+    awaitingAckRef.current = false
+    clearIntent()
+    setRoomBoth(null)
+    setError(null)
+    setBusy(false)
+    // Best effort; the ack is ignored. Per-socket ordering means a join emitted
+    // right after this still lands after the leave server-side.
+    socket.emit('player:leave', () => {})
+  }, [socket, clearIntent, setRoomBoth])
 
-  const boundRef = useRef(false)
+  const boundOnceRef = useRef(false)
   useEffect(() => {
-    if (boundRef.current) return
-    boundRef.current = true
+    if (boundOnceRef.current) return
+    boundOnceRef.current = true
     socket.on('room:state', (state) => {
+      // A broadcast for a room we have no intent to be in is racing a leave.
+      if (!shouldAcceptState(state, intentRef.current)) return
       setRoomBoth(state)
       setBusy(false)
       // Keep the address bar on the room's canonical path (deep links, refresh-resume).
@@ -157,8 +195,42 @@ export function useRoom(): RoomApi {
         window.history.replaceState(null, '', canonical)
       }
     })
-    socket.on('connect', () => setConnected(true))
-    socket.on('disconnect', () => setConnected(false))
+    socket.on('connect', () => {
+      setConnected(true)
+      // socket.io reconnects the transport but not our room membership: re-issue
+      // the join for the room we intend to be in, so a server restart / network
+      // blip does not leave Vote/Reveal/Reset as silent no-ops.
+      const rejoin = rejoinAction(intentRef.current, {
+        boundOnThisSocket: boundRef.current,
+        awaitingAck: awaitingAckRef.current
+      })
+      if (!rejoin) return
+      boundRef.current = true
+      const op = beginOp()
+      socket.emit(
+        'room:join',
+        { code: rejoin.code, name: rejoin.name, playerId: rejoin.playerId },
+        (result) => {
+          endOp(op)
+          setBusy(false)
+          if (result.ok) return
+          // The room is gone (memory-only restart, or the sweep got to it):
+          // fall back to the lobby with our name kept and the reason shown.
+          clearIntent()
+          setRoomBoth(null)
+          setError(result.error)
+          setLobbyTarget(roomTargetFromPath(window.location.pathname))
+        }
+      )
+    })
+    socket.on('disconnect', () => {
+      setConnected(false)
+      // This connection is dead: nothing is in flight any more, and the next
+      // connect has to rejoin even if we were mid-op.
+      boundRef.current = false
+      awaitingAckRef.current = false
+      opRef.current++
+    })
 
     // The URL wins over the stored session: a room path joins that room;
     // only `/` resumes the last session. Without a stored name we can't join
@@ -166,18 +238,10 @@ export function useRoom(): RoomApi {
     const initial = roomTargetFromPath(window.location.pathname)
     const storedName = readStoredName()
     if (initial) {
-      if (storedName.trim().length > 0) joinTarget(initial, storedName, false)
+      if (storedName.trim().length > 0) doJoin(initial, storedName, { pushUrl: false })
     } else {
       const saved = loadSession()
-      if (saved) {
-        socket.emit(
-          'room:join',
-          { code: saved.code, name: saved.name, playerId: saved.playerId },
-          (result) => {
-            if (!result.ok) clearSession()
-          }
-        )
-      }
+      if (saved) doJoin({ kind: 'code', value: saved.code }, saved.name, { pushUrl: false })
     }
 
     window.addEventListener('popstate', () => {
@@ -189,29 +253,26 @@ export function useRoom(): RoomApi {
         return
       }
       if (current && targetMatchesRoom(next, current)) return
-      if (current) {
-        socket.emit('player:leave', () => {
-          clearSession()
-          setRoomBoth(null)
-          joinTarget(next, readStoredName(), false)
-        })
-      } else {
-        joinTarget(next, readStoredName(), false)
-      }
+      // Leave then join back to back: ordering is guaranteed per socket, and the
+      // server handles the events sequentially, so no ack-wait is needed.
+      if (current) leaveRoom()
+      doJoin(next, readStoredName(), { pushUrl: false })
     })
-  }, [socket, joinTarget, leaveRoom, setRoomBoth])
+  }, [socket, doJoin, leaveRoom, setRoomBoth, beginOp, endOp, bindIntent, clearIntent])
 
   const createRoom = useCallback(
     (name: string, roomName?: string) => {
       setError(null)
       setBusy(true)
+      const op = beginOp()
       socket.emit('room:create', { name, playerId: meId, roomName }, (result) => {
+        endOp(op)
         if (!result.ok) {
           setBusy(false)
           setError(result.error)
           return
         }
-        saveSession({ code: result.code, name, playerId: meId })
+        bindIntent({ code: result.code, name, playerId: meId })
         pushRoomPath(
           canonicalRoomPath({
             code: result.code,
@@ -220,43 +281,21 @@ export function useRoom(): RoomApi {
         )
       })
     },
-    [socket, meId, pushRoomPath]
+    [socket, meId, pushRoomPath, beginOp, endOp, bindIntent]
   )
 
   const joinRoom = useCallback(
     (code: string, name: string) => {
-      setError(null)
-      setBusy(true)
-      socket.emit('room:join', { code, name, playerId: meId }, (result) => {
-        if (!result.ok) {
-          setBusy(false)
-          setError(result.error)
-          return
-        }
-        saveSession({ code: result.code, name, playerId: meId })
-        pushRoomPath(canonicalRoomPath({ code: result.code, name: null }))
-      })
+      doJoin({ kind: 'code', value: code }, name, { pushUrl: true })
     },
-    [socket, meId, pushRoomPath]
+    [doJoin]
   )
 
   const joinByName = useCallback(
     (roomName: string, name: string) => {
-      setError(null)
-      setBusy(true)
-      socket.emit('room:join', { roomName, name, playerId: meId }, (result) => {
-        if (!result.ok) {
-          setBusy(false)
-          setError(result.error)
-          return
-        }
-        saveSession({ code: result.code, name, playerId: meId })
-        pushRoomPath(
-          canonicalRoomPath({ code: result.code, name: slugifyRoomName(roomName) })
-        )
-      })
+      doJoin({ kind: 'name', value: roomName }, name, { pushUrl: true })
     },
-    [socket, meId, pushRoomPath]
+    [doJoin]
   )
 
   const vote = useCallback(
