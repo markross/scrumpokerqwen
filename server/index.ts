@@ -227,7 +227,15 @@ io.on('connection', (socket) => {
 })
 
 const sweeper = setInterval(() => {
-  for (const code of rooms.sweepStaleRooms(store)) repository.remove(code)
+  const { deleted, cleared } = rooms.sweepStaleRooms(store)
+  for (const code of deleted) repository.remove(code)
+  for (const code of cleared) {
+    persist(code) // the evicted roster has to survive a restart too
+    broadcast(code) // a tab left open should show the room emptying out
+  }
+  if (deleted.length > 0) console.log(`Deleted ${deleted.length} stale room(s): ${deleted.join(', ')}`)
+  // Named rooms are never deleted; they just lose the players who have gone.
+  if (cleared.length > 0) console.log(`Emptied ${cleared.length} stale named room(s): ${cleared.join(', ')}`)
 }, 10 * 60 * 1000)
 sweeper.unref()
 

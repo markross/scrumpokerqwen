@@ -232,30 +232,102 @@ describe('removePlayer', () => {
 })
 
 describe('sweepStaleRooms', () => {
-  it('drops rooms untouched past the TTL', () => {
+  const stale = (store: Store, code: string): void => {
+    store.get(code)!.updatedAt = Date.now() - 25 * 60 * 60 * 1000
+  }
+
+  it('deletes unnamed rooms untouched past the TTL', () => {
     const { store, code } = newStoreWithPlayers([['p1', 'Alice']])
-    const room = store.get(code)!
-    room.updatedAt = Date.now() - 25 * 60 * 60 * 1000
-    sweepStaleRooms(store)
+    stale(store, code)
+    expect(sweepStaleRooms(store).deleted).toEqual([code])
     expect(store.has(code)).toBe(false)
   })
 
-  it('keeps named rooms regardless of age', () => {
+  it('deletes an unnamed room even when a player is still connected', () => {
+    const { store, code } = newStoreWithPlayers([['p1', 'Alice']])
+    ok(attachSocket(store, code, 'p1', 's1'))
+    stale(store, code)
+    expect(sweepStaleRooms(store).deleted).toEqual([code])
+    expect(store.has(code)).toBe(false)
+  })
+
+  it('keeps a named room but evicts the players who have gone', () => {
+    // The point of the named-room rule: today's team shouldn't inherit
+    // yesterday's absent players, but the room itself is the thing people come
+    // back to.
     const store: Store = new Map()
     const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
-    room.updatedAt = Date.now() - 30 * 24 * 60 * 60 * 1000
+    ok(joinRoom(store, room.code, 'Bob', 'p2'))
+    ok(attachSocket(store, room.code, 'p2', 's2')) // Bob is still here
+    stale(store, room.code)
+
+    const result = sweepStaleRooms(store)
+    expect(store.has(room.code)).toBe(true)
+    expect(result.deleted).toEqual([])
+    expect(result.cleared).toEqual([room.code])
+    expect([...room.players.keys()]).toEqual(['p2'])
+  })
+
+  it('starts a fresh round when a stale named room is emptied', () => {
+    const store: Store = new Map()
+    const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    ok(placeVote(store, room.code, 'p1', '8'))
+    ok(revealRoom(store, room.code))
+    stale(store, room.code)
+
+    const result = sweepStaleRooms(store)
+    expect(store.has(room.code)).toBe(true)
+    expect(result.cleared).toEqual([room.code])
+    expect(room.players.size).toBe(0) // votes left with their players
+    expect(room.phase).toBe('voting') // today's team gets a clean board
+  })
+
+  it('leaves an attended room in the round it was left in', () => {
+    const store: Store = new Map()
+    const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    ok(joinRoom(store, room.code, 'Bob', 'p2'))
+    ok(attachSocket(store, room.code, 'p1', 's1')) // Alice never left
+    ok(revealRoom(store, room.code))
+    stale(store, room.code)
+
     sweepStaleRooms(store)
+    expect([...room.players.keys()]).toEqual(['p1'])
+    expect(room.phase).toBe('revealed') // she is looking at that summary
+  })
+
+  it('is a no-op on an empty named room, however old', () => {
+    // Long-lived empty named rooms are the normal case, so they must not be
+    // reported (and re-persisted) on every tick.
+    const store: Store = new Map()
+    const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    removePlayer(store, room.code, 'p1')
+    stale(store, room.code)
+    expect(sweepStaleRooms(store)).toEqual({ deleted: [], cleared: [] })
     expect(store.has(room.code)).toBe(true)
   })
 
-  it('returns the codes it deleted (for durable cleanup)', () => {
+  it('keeps a named room that has been touched inside the TTL', () => {
+    const store: Store = new Map()
+    const room = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
+    stale(store, room.code)
+    ok(joinRoomByName(store, 'team-alpha', 'Bob', 'p2')) // activity refreshes the clock
+    expect(sweepStaleRooms(store)).toEqual({ deleted: [], cleared: [] })
+    expect(store.has(room.code)).toBe(true)
+    expect(room.players.size).toBe(2)
+  })
+
+  it('reports deleted and cleared codes separately (for durable cleanup)', () => {
     const store: Store = new Map()
     const named = ok(createRoom(store, 'Alice', 'p1', 'Team Alpha'))
-    const stale = ok(createRoom(store, 'Bob', 'p2'))
-    stale.updatedAt = Date.now() - 25 * 60 * 60 * 1000
-    const deleted = sweepStaleRooms(store)
-    expect(deleted).toEqual([stale.code])
+    const unnamed = ok(createRoom(store, 'Bob', 'p2'))
+    const fresh = ok(createRoom(store, 'Carol', 'p3'))
+    stale(store, named.code)
+    stale(store, unnamed.code)
+
+    expect(sweepStaleRooms(store)).toEqual({ deleted: [unnamed.code], cleared: [named.code] })
+    expect(store.has(unnamed.code)).toBe(false)
     expect(store.has(named.code)).toBe(true)
+    expect(store.has(fresh.code)).toBe(true)
   })
 })
 

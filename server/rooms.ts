@@ -237,17 +237,50 @@ export function getView(room: Room, forPlayerId: string): RoomState {
   }
 }
 
-/** Drops stale unnamed rooms; named rooms persist forever. Returns deleted codes. */
-export function sweepStaleRooms(store: Store, now: number = Date.now()): string[] {
+/**
+ * Housekeeping for rooms nobody has touched in `ROOM_TTL_MS`.
+ *
+ * - **Unnamed** rooms are deleted outright: nothing memorable is left behind.
+ * - **Named** rooms stay — the name is the product (a URL a team comes back to,
+ *   `/<team-alpha>`) — but yesterday's *absent* players are evicted, so today's
+ *   team isn't sharing a board with people who have gone: players whose socket
+ *   is already gone are removed, their votes with them, and once the roster is
+ *   empty the round starts over. A player who still has the tab open is present,
+ *   so they keep their seat (and an attended room keeps its revealed summary).
+ *
+ * `deleted` codes need their durable snapshot removed; `cleared` codes need the
+ * emptied room re-saved and re-broadcast (the caller does both — this stays a
+ * pure state machine). Rooms needing nothing appear in neither list, so a
+ * long-lived empty named room costs one date comparison per tick, not a write.
+ */
+export interface SweepResult {
+  deleted: string[]
+  cleared: string[]
+}
+
+export function sweepStaleRooms(store: Store, now: number = Date.now()): SweepResult {
   const deleted: string[] = []
+  const cleared: string[] = []
   for (const [code, room] of store) {
-    if (room.name !== null) continue
-    if (now - room.updatedAt > ROOM_TTL_MS) {
+    if (now - room.updatedAt <= ROOM_TTL_MS) continue
+    if (room.name === null) {
       store.delete(code)
       deleted.push(code)
+      continue
     }
+    let changed = false
+    for (const [playerId, player] of room.players) {
+      if (player.socketId !== null) continue // present — not yesterday's absentee
+      room.players.delete(playerId)
+      changed = true
+    }
+    if (room.players.size === 0 && room.phase !== 'voting') {
+      room.phase = 'voting'
+      changed = true
+    }
+    if (changed) cleared.push(code)
   }
-  return deleted
+  return { deleted, cleared }
 }
 
 export function serializeRoom(room: Room): RoomSnapshot {
