@@ -1,0 +1,25 @@
+name: SonarQube
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sonarqube:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history so SonarQube can compute "new code" reliably
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      # deps on disk improve TypeScript analysis quality (type resolution)
+      - run: npm ci
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v8.4.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

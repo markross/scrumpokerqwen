@@ -45,6 +45,17 @@ npm run dev
 | `npm test`           | Vitest unit tests (room state machine)   |
 | `npm run lint`       | ESLint                                   |
 
+## Code quality (SonarQube Cloud)
+
+`.github/workflows/sonarqube.yml` scans every PR and `main` push with
+[SonarQube Cloud](https://sonarcloud.io/project/overview?id=markross_scrumpokerqwen)
+(official `SonarSource/sonarqube-scan-action`; analysis scope lives in
+`sonar-project.properties`). One-time setup: create the project on SonarQube
+Cloud, then add a `SONAR_TOKEN` secret in this repo's
+**Settings → Secrets and variables → Actions** (token from SonarQube Cloud →
+My Account → Security). The scan is informational — the required merge check
+is still CI's `checks` job, so a missing token never blocks merges.
+
 ## Architecture
 
 - `shared/types.ts` — domain types + socket event contracts used by both sides.

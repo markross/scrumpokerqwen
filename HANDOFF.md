@@ -82,6 +82,7 @@ npm run build && npm start   # production (single service, :3001, PORT env)
 | `60ccb0c` | feat(rooms): optional room names, join by name + `?room=` links, durable rooms via RoomRepository — PR #9 |
 | `2b068f4` | feat(routing): path-based rooms — `/<name-slug>` + `/<CODE>` endpoints, slugified names, query-string links dropped — PR #10 |
 | `5508546` | fix(server): socket handler hardening — no single malformed packet can crash the server — PR #11 |
+| `a9bc46b` | ci: SonarQube Cloud scan workflow (official scan action + sonar-project.properties) — PR #18 |
 
 ## Next steps
 
@@ -98,6 +99,7 @@ Phase 1 is complete; Phase 2 is complete except rate-limiting (deferred by user 
 
 - ✅ **Pin `lucide-react`** — pinned to `1.59.0` (`00597e2`).
 - ✅ **CI** — `.github/workflows/ci.yml`: `npm ci && lint && test && build` on PR/main (`1ab93b2`). Actions bumped to `checkout@v5`/`setup-node@v6` (`9cee10c`).
+- ✅ **SonarQube Cloud scan** — `.github/workflows/sonarqube.yml` (`a9bc46b`, PR #18): official `SonarSource/sonarqube-scan-action@v8.4.0` on PR/main, org `markross`, project `markross_scrumpokerqwen`; scope in `sonar-project.properties` (server/client/shared, tests classified via `*.test.ts`, explicit tsconfigPaths). Needs `SONAR_TOKEN` repo secret (user); informational — required check stays CI's `checks`.
 - ✅ **PR review workflow** — `main` protected via GitHub API: PRs required, CI `checks` must pass (and be up to date), force-push/delete blocked, enforced on admins too. Every change (features, tooling, docs) ships as a PR opened with `gh pr create` for the user to review/merge — see AGENTS.md "Workflow" and `.github/PULL_REQUEST_TEMPLATE.md`.
 - ✅ **Automated e2e** — `server/realtime.test.ts`: three two-client socket.io tests against the booted server (`ee4b035`). `server/index.ts` now exports `httpServer`/`io` and skips auto-listen when `process.env.VITEST` is set — prod boot unchanged (`npm start` smoke-tested). Playwright UI tests remain an optional extra.
 - **Rate-limit `room:create` / join** — **deferred 2026-10-19** (user decision): low risk at current scale (Render free-tier limits + 30-player cap + 24 h TTL sweep make abuse unlikely); revisit before heavy public use. Likely shape: pure token bucket keyed by client IP, wired in `server/index.ts` (keep `rooms.ts` pure).
